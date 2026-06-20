@@ -88,11 +88,23 @@
                       {{ __('Buyer requirements used before selecting inventory units.') }}
                     </div>
                   </div>
-                  <Button
-                    :label="__('Edit')"
-                    variant="subtle"
-                    @click="editBuyerInterestPreferences"
-                  />
+                  <div class="flex flex-wrap justify-end gap-2">
+                    <Button
+                      :label="__('1st Call No Answer')"
+                      variant="subtle"
+                      @click="recordNoAnswerAttempt(1)"
+                    />
+                    <Button
+                      :label="__('2nd Call No Answer')"
+                      variant="subtle"
+                      @click="recordNoAnswerAttempt(2)"
+                    />
+                    <Button
+                      :label="__('Edit')"
+                      variant="subtle"
+                      @click="editBuyerInterestPreferences"
+                    />
+                  </div>
                 </div>
                 <div class="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
                   <div
@@ -108,13 +120,20 @@
                 </div>
               </div>
               <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
-                <div class="mb-3">
-                  <div class="text-sm font-medium text-ink-gray-9">
-                    {{ __('Add Inventory Units to Interest') }}
+                <div class="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div class="text-sm font-medium text-ink-gray-9">
+                      {{ __('Add Inventory Units or Requests to Interest') }}
+                    </div>
+                    <div class="text-xs text-ink-gray-6">
+                      {{ __('Select available inventory units, or record a buyer request when the requirement is not currently in inventory.') }}
+                    </div>
                   </div>
-                  <div class="text-xs text-ink-gray-6">
-                    {{ __('Select one or many available inventory units, then save them to this buyer interest list.') }}
-                  </div>
+                  <Button
+                    :label="__('Add Request (Not in Inventory)')"
+                    variant="subtle"
+                    @click="addInterestRequest"
+                  />
                 </div>
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-start">
                   <TableMultiselectInput
@@ -150,14 +169,14 @@
               <table v-if="isBuyerLead" class="w-full text-left text-sm">
                 <thead class="border-b bg-surface-gray-1 text-ink-gray-6">
                   <tr>
-                    <th class="px-4 py-3 font-medium">{{ __('Unit SKU') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Unit Name') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ __('Type / SKU') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ __('Unit / Request Notes') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Area') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Developer') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Compound') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Finishing Type') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Budget') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Proposal Status') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ __('Status') }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -166,14 +185,24 @@
                     :key="row.name"
                     class="border-b last:border-b-0"
                   >
-                    <td class="px-4 py-3 text-ink-gray-9">{{ row.sku || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.name || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ formatUnitArea(row) }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.developer || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.project || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.finishing_type || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ formatPrice(row.price) }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.proposal_status || __('Not Sent') }}</td>
+                    <td class="px-4 py-3 text-ink-gray-9">
+                      <span
+                        v-if="isRequestInterest(row)"
+                        class="rounded bg-surface-gray-2 px-2 py-1 text-xs font-medium text-ink-gray-7"
+                      >
+                        {{ __('Request') }}
+                      </span>
+                      <span v-else>{{ row.sku || __('—') }}</span>
+                    </td>
+                    <td class="px-4 py-3 text-ink-gray-8">
+                      {{ isRequestInterest(row) ? row.request_notes || __('—') : row.name || __('—') }}
+                    </td>
+                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : formatUnitArea(row) }}</td>
+                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : row.developer || __('—') }}</td>
+                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : row.project || __('—') }}</td>
+                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : row.finishing_type || __('—') }}</td>
+                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : formatPrice(row.price) }}</td>
+                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? row.request_status || __('Open') : row.proposal_status || __('Not Sent') }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -661,6 +690,14 @@ const buyerInterestPreferenceRows = computed(() => [
     value: doc.value.preferred_delivery_time,
   },
   {
+    label: __('No Answer – 1st Call'),
+    value: doc.value.no_answer_first_call || 0,
+  },
+  {
+    label: __('No Answer – 2nd Call'),
+    value: doc.value.no_answer_second_call || 0,
+  },
+  {
     label: __('Budget'),
     value: formatPrice(doc.value.buyer_budget),
   },
@@ -686,6 +723,33 @@ function formatPreferredArea() {
 function formatUnitArea(row) {
   const unitArea = row.unit_area || row.area || row.size
   return unitArea ? [unitArea, doc.value.area_unit].filter(Boolean).join(' ') : __('—')
+}
+
+function isRequestInterest(row) {
+  return row?.interest_record_type === 'Request'
+}
+
+async function recordNoAnswerAttempt(attemptNumber) {
+  if (!isBuyerLead.value) {
+    toast.error(__('Only buyer leads can track buyer no-answer call attempts'))
+    return
+  }
+
+  try {
+    const result = await call('real_estate_crm_customs.api.record_no_answer_attempt', {
+      lead: props.leadId,
+      attempt_number: attemptNumber,
+    })
+    doc.value.no_answer_first_call = result.no_answer_first_call || 0
+    doc.value.no_answer_second_call = result.no_answer_second_call || 0
+    sections.reload()
+    document.reload?.()
+    toast.success(__('No-answer call attempt recorded'))
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] || err.message || __('Error recording no-answer call attempt'),
+    )
+  }
 }
 
 async function editBuyerInterestPreferences() {
@@ -778,6 +842,50 @@ function getSelectedInterestUnitName(row) {
   if (!row) return null
   if (typeof row === 'string') return row
   return row.unit || row.value || row.name || row.real_estate_unit || null
+}
+
+async function addInterestRequest() {
+  if (!isBuyerLead.value) {
+    toast.error(__('Only buyer leads can have request-only interest records'))
+    return
+  }
+
+  let values = await renderFieldLayoutDialog({
+    title: __('Add Request Not in Inventory'),
+    fields: [
+      {
+        fieldname: 'request_notes',
+        fieldtype: 'Small Text',
+        label: __('Request Notes'),
+        reqd: 1,
+      },
+      {
+        fieldname: 'request_status',
+        fieldtype: 'Select',
+        label: __('Request Status'),
+        options: '\nOpen\nFulfilled\nCancelled',
+        default: 'Open',
+      },
+    ],
+    submitLabel: __('Add Request'),
+  })
+
+  if (!values?.request_notes) return
+
+  try {
+    await call('real_estate_crm_customs.api.add_interest_request', {
+      lead: props.leadId,
+      request_notes: values.request_notes,
+      request_status: values.request_status || 'Open',
+    })
+    linkedProperties.reload()
+    document.reload?.()
+    toast.success(__('Buyer request added to the interest list'))
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] || err.message || __('Error adding buyer request'),
+    )
+  }
 }
 
 async function addSelectedInterestedUnits() {
