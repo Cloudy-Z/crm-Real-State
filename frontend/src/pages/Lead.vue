@@ -90,14 +90,24 @@
                   </div>
                   <div class="flex flex-wrap justify-end gap-2">
                     <Button
-                      :label="__('1st Call No Answer')"
-                      variant="subtle"
-                      @click="recordNoAnswerAttempt(1)"
+                      :label="__('Call Answered')"
+                      variant="solid"
+                      @click="recordLeadCallOutcome('Answered')"
                     />
                     <Button
-                      :label="__('2nd Call No Answer')"
+                      :label="__('No Answer')"
                       variant="subtle"
-                      @click="recordNoAnswerAttempt(2)"
+                      @click="recordLeadCallOutcome('No Answer')"
+                    />
+                    <Button
+                      :label="__('WhatsApp Action')"
+                      variant="subtle"
+                      @click="recordLeadOutreachAction('WhatsApp')"
+                    />
+                    <Button
+                      :label="__('Email Action')"
+                      variant="subtle"
+                      @click="recordLeadOutreachAction('Email')"
                     />
                     <Button
                       :label="__('Edit')"
@@ -690,12 +700,24 @@ const buyerInterestPreferenceRows = computed(() => [
     value: doc.value.preferred_delivery_time,
   },
   {
-    label: __('No Answer – 1st Call'),
+    label: __('No Answer – Current Streak'),
+    value: doc.value.no_answer_consecutive_count || 0,
+  },
+  {
+    label: __('No Answer – Total History'),
+    value: doc.value.no_answer_total_count || 0,
+  },
+  {
+    label: __('No Answer – 1st Call Flag'),
     value: doc.value.no_answer_first_call || 0,
   },
   {
-    label: __('No Answer – 2nd Call'),
+    label: __('No Answer – 2nd Call Flag'),
     value: doc.value.no_answer_second_call || 0,
+  },
+  {
+    label: __('Last Call Outcome'),
+    value: doc.value.last_call_outcome,
   },
   {
     label: __('Budget'),
@@ -729,25 +751,101 @@ function isRequestInterest(row) {
   return row?.interest_record_type === 'Request'
 }
 
-async function recordNoAnswerAttempt(attemptNumber) {
-  if (!isBuyerLead.value) {
-    toast.error(__('Only buyer leads can track buyer no-answer call attempts'))
-    return
-  }
+function updateLeadActionState(result) {
+  if (!result) return
+  ;[
+    'status',
+    'no_answer_first_call',
+    'no_answer_second_call',
+    'no_answer_consecutive_count',
+    'no_answer_total_count',
+    'last_call_outcome',
+    'last_call_at',
+  ].forEach((fieldname) => {
+    if (Object.hasOwn(result, fieldname)) {
+      doc.value[fieldname] = result[fieldname]
+    }
+  })
+}
 
+async function recordLeadCallOutcome(outcome) {
   try {
-    const result = await call('real_estate_crm_customs.api.record_no_answer_attempt', {
+    const result = await call('real_estate_crm_customs.api.record_lead_call_outcome', {
       lead: props.leadId,
-      attempt_number: attemptNumber,
+      outcome,
     })
-    doc.value.no_answer_first_call = result.no_answer_first_call || 0
-    doc.value.no_answer_second_call = result.no_answer_second_call || 0
+    updateLeadActionState(result)
     sections.reload()
     document.reload?.()
-    toast.success(__('No-answer call attempt recorded'))
+    activities.value?.all_activities?.reload?.()
+    toast.success(
+      outcome === 'No Answer'
+        ? __('No-answer call recorded and Lead status synced')
+        : __('Answered call recorded, active no-answer counter reset, and Lead status synced'),
+    )
   } catch (err) {
     toast.error(
-      err.messages?.[0] || err.message || __('Error recording no-answer call attempt'),
+      err.messages?.[0] || err.message || __('Error recording call outcome'),
+    )
+  }
+}
+
+async function recordNoAnswerAttempt() {
+  await recordLeadCallOutcome('No Answer')
+}
+
+async function recordLeadOutreachAction(channel) {
+  const isEmail = channel === 'Email'
+  let values = await renderFieldLayoutDialog({
+    title: isEmail ? __('Send Email Action') : __('Send WhatsApp Action'),
+    fields: [
+      ...(isEmail
+        ? [
+            {
+              fieldname: 'subject',
+              fieldtype: 'Data',
+              label: __('Subject'),
+              default: __('Follow up for {0}', [title.value]),
+              reqd: 1,
+            },
+          ]
+        : []),
+      {
+        fieldname: 'message',
+        fieldtype: 'Small Text',
+        label: __('Message'),
+        default: __('Hello {0}, this is a follow-up from your assigned real estate agent.', [title.value]),
+        reqd: 1,
+      },
+      {
+        fieldname: 'send',
+        fieldtype: 'Check',
+        label: __('Send now through the system'),
+        default: 1,
+      },
+    ],
+    submitLabel: isEmail ? __('Send Email') : __('Send WhatsApp'),
+  })
+
+  if (!values?.message) return
+
+  try {
+    const result = await call('real_estate_crm_customs.api.record_lead_outreach_action', {
+      lead: props.leadId,
+      channel,
+      subject: values.subject,
+      message: values.message,
+      send: values.send ? 1 : 0,
+    })
+    activities.value?.all_activities?.reload?.()
+    toast.success(
+      result?.sent
+        ? __('{0} action sent from assigned agent identity', [channel])
+        : __('{0} action recorded for assigned agent identity', [channel]),
+    )
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] || err.message || __('Error recording outreach action'),
     )
   }
 }
