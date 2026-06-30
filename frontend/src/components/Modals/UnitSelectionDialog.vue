@@ -107,7 +107,8 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { Dialog, call } from 'frappe-ui'
-import { __ } from '@/utils'
+
+// __ is globally available via window.__ (set by translation plugin)
 
 const props = defineProps({
   leadId: { type: String, required: true },
