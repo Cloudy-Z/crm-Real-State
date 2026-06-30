@@ -78,14 +78,15 @@
           </div>
           <div class="flex-1 overflow-auto p-5">
             <div v-if="isBuyerLead" class="mb-5 flex flex-col gap-4">
+              <!-- Card 1: Flags & Actions (top) -->
               <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
                 <div class="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <div class="text-sm font-medium text-ink-gray-9">
-                      {{ __('Interest Details') }}
+                      {{ __('Flags & Actions') }}
                     </div>
                     <div class="text-xs text-ink-gray-6">
-                      {{ __('Buyer requirements used before selecting inventory units.') }}
+                      {{ __('Call outcome tracking and outreach actions for this lead.') }}
                     </div>
                   </div>
                   <div class="flex flex-wrap justify-end gap-2">
@@ -109,12 +110,37 @@
                       variant="subtle"
                       @click="recordLeadOutreachAction('Email')"
                     />
-                    <Button
-                      :label="__('Edit')"
-                      variant="subtle"
-                      @click="editBuyerInterestPreferences"
-                    />
                   </div>
+                </div>
+                <div class="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-5">
+                  <div
+                    v-for="item in callFlagsRows"
+                    :key="item.label"
+                    class="rounded bg-surface-gray-1 p-3"
+                  >
+                    <div class="text-xs text-ink-gray-5">{{ item.label }}</div>
+                    <div class="mt-1 font-medium text-ink-gray-9">
+                      {{ item.value || __('—') }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Card 2: Interest Details -->
+              <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-medium text-ink-gray-9">
+                      {{ __('Interest Details') }}
+                    </div>
+                    <div class="text-xs text-ink-gray-6">
+                      {{ __('Buyer requirements used before selecting inventory units.') }}
+                    </div>
+                  </div>
+                  <Button
+                    :label="__('Edit')"
+                    variant="subtle"
+                    @click="editBuyerInterestPreferences"
+                  />
                 </div>
                 <div class="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
                   <div
@@ -129,6 +155,7 @@
                   </div>
                 </div>
               </div>
+              <!-- Card 3: Add Inventory Units or Requests -->
               <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
                 <div class="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
@@ -146,16 +173,10 @@
                   />
                 </div>
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-start">
-                  <TableMultiselectInput
-                    v-model="selectedInterestUnits"
-                    class="flex-1"
-                    doctype="Lead Interested Unit"
-                  />
                   <Button
-                    :label="__('Add Selected Units')"
+                    :label="__('Browse Inventory Units')"
                     variant="solid"
-                    :disabled="!selectedInterestUnits.length"
-                    @click="addSelectedInterestedUnits"
+                    @click="openUnitSelectionPopup"
                   />
                 </div>
               </div>
@@ -325,38 +346,14 @@
               </Tooltip>
               <div class="flex gap-1.5">
                 <Button
-                  v-if="callEnabled"
-                  :tooltip="__('Make a Call')"
+                  :tooltip="__('Open WhatsApp Chat')"
+                  :icon="WhatsAppIcon"
+                  @click="openWhatsAppChat"
+                />
+                <Button
+                  :tooltip="__('Call Lead')"
                   :icon="PhoneIcon"
-                  @click="
-                    () =>
-                      doc.mobile_no
-                        ? makeCall(doc.mobile_no)
-                        : toast.error(
-                            __('Please set a mobile number to make calls'),
-                          )
-                  "
-                />
-
-                <Button
-                  :tooltip="__('Send an Email')"
-                  :icon="Email2Icon"
-                  @click="
-                    doc.email
-                      ? openEmailBox()
-                      : toast.error(
-                          __('Please set an email address to send emails'),
-                        )
-                  "
-                />
-                <Button
-                  :tooltip="__('Go to Website')"
-                  :icon="LinkIcon"
-                  @click="
-                    doc.website
-                      ? openWebsite(doc.website)
-                      : toast.error(__('Please set a website to visit'))
-                  "
+                  @click="triggerLeadCall"
                 />
 
                 <Button
@@ -433,6 +430,11 @@
     doctype="CRM Lead"
     :document="document"
   />
+  <UnitSelectionDialog
+    v-model="showUnitSelectionDialog"
+    :lead-id="leadId"
+    @units-added="onUnitsAdded"
+  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
@@ -449,6 +451,7 @@ import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import CameraIcon from '@/components/Icons/CameraIcon.vue'
 import LinkIcon from '@/components/Icons/LinkIcon.vue'
 import AttachmentIcon from '@/components/Icons/AttachmentIcon.vue'
+import WhatsAppIcon from '@/components/Icons/WhatsAppIcon.vue'
 import LostReasonModal from '@/components/Modals/LostReasonModal.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import Activities from '@/components/Activities/Activities.vue'
@@ -459,6 +462,7 @@ import SLASection from '@/components/SLASection.vue'
 import TableMultiselectInput from '@/components/Controls/TableMultiselectInput.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
+import UnitSelectionDialog from '@/components/Modals/UnitSelectionDialog.vue'
 import {
   openWebsite,
   setupCustomizations,
@@ -510,6 +514,7 @@ const showDeleteLinkedDocModal = ref(false)
 const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
 const selectedInterestUnits = ref([])
+const showUnitSelectionDialog = ref(false)
 
 const {
   triggerOnChange,
@@ -676,12 +681,8 @@ const linkedPropertiesEmptyText = computed(() =>
 
 const buyerInterestPreferenceRows = computed(() => [
   {
-    label: __('Interested Unit Area'),
+    label: __('Preferred Area'),
     value: formatPreferredArea(),
-  },
-  {
-    label: __('Area'),
-    value: doc.value.preferred_area,
   },
   {
     label: __('Developer'),
@@ -700,28 +701,31 @@ const buyerInterestPreferenceRows = computed(() => [
     value: doc.value.preferred_delivery_time,
   },
   {
-    label: __('No Answer – Current Streak'),
+    label: __('Budget'),
+    value: formatPrice(doc.value.buyer_budget),
+  },
+])
+
+const callFlagsRows = computed(() => [
+  {
+    label: __('Current No-Answer Streak'),
     value: doc.value.no_answer_consecutive_count || 0,
   },
   {
-    label: __('No Answer – Total History'),
+    label: __('Total No-Answer History'),
     value: doc.value.no_answer_total_count || 0,
   },
   {
-    label: __('No Answer – 1st Call Flag'),
-    value: doc.value.no_answer_first_call || 0,
+    label: __('1st Call No-Answer'),
+    value: doc.value.no_answer_first_call ? __('Yes') : __('No'),
   },
   {
-    label: __('No Answer – 2nd Call Flag'),
-    value: doc.value.no_answer_second_call || 0,
+    label: __('2nd Call No-Answer'),
+    value: doc.value.no_answer_second_call ? __('Yes') : __('No'),
   },
   {
     label: __('Last Call Outcome'),
-    value: doc.value.last_call_outcome,
-  },
-  {
-    label: __('Budget'),
-    value: formatPrice(doc.value.buyer_budget),
+    value: doc.value.last_call_outcome || __('—'),
   },
 ])
 
@@ -1081,6 +1085,43 @@ function updateField(name, value) {
 
 function deleteLead() {
   showDeleteLinkedDocModal.value = true
+}
+
+function openWhatsAppChat() {
+  const phone = doc.value.whatsapp_number || doc.value.mobile_no
+  if (!phone) {
+    toast.error(__('Please set a WhatsApp number or mobile number for this lead'))
+    return
+  }
+  // Clean phone number: remove spaces, dashes, and leading +
+  const cleanPhone = phone.replace(/[\s\-+]/g, '')
+  // Use wa.me deep link which works on Android, iOS, and desktop
+  window.open(`https://wa.me/${cleanPhone}`, '_blank')
+}
+
+function triggerLeadCall() {
+  const phone = doc.value.mobile_no || doc.value.whatsapp_number
+  if (!phone) {
+    toast.error(__('Please set a mobile number for this lead'))
+    return
+  }
+  // If CRM telephony is enabled, use the built-in makeCall
+  if (callEnabled.value) {
+    makeCall(phone)
+    return
+  }
+  // Fallback: use tel: URI which works on Android, iOS, and desktop
+  window.open(`tel:${phone}`, '_self')
+}
+
+function openUnitSelectionPopup() {
+  showUnitSelectionDialog.value = true
+}
+
+function onUnitsAdded() {
+  linkedProperties.reload()
+  document.reload?.()
+  toast.success(__('Selected inventory units added to the buyer interest list'))
 }
 
 function openEmailBox() {
