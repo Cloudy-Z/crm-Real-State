@@ -61,55 +61,68 @@
                 {{ linkedPropertiesDescription }}
               </div>
             </div>
-            <div class="flex gap-2">
-              <Button
-                v-if="isBuyerLead"
-                :label="__('Edit Interest Details')"
-                variant="subtle"
-                @click="editBuyerInterestPreferences"
-              />
-              <Button
-                v-if="isSellerLead"
-                :label="__('Assign Property Unit')"
-                variant="solid"
-                @click="assignPropertyUnitToSeller"
-              />
-            </div>
           </div>
           <div class="flex-1 overflow-auto p-5">
             <div v-if="isBuyerLead" class="mb-5 flex flex-col gap-4">
-              <!-- Card 1: Flags & Actions (top) -->
+              <!-- Card 1: Gated Actions (top) -->
               <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
                 <div class="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <div class="text-sm font-medium text-ink-gray-9">
-                      {{ __('Flags & Actions') }}
+                      {{ __('Lead Actions') }}
                     </div>
                     <div class="text-xs text-ink-gray-6">
-                      {{ __('Call outcome tracking and outreach actions for this lead.') }}
+                      {{ __('Available actions based on current lead status: ') }}
+                      <span class="font-semibold">{{ doc.status || __('Fresh Lead') }}</span>
                     </div>
                   </div>
-                  <div class="flex flex-wrap justify-end gap-2">
-                    <Button
-                      :label="__('Call Answered')"
-                      variant="solid"
-                      @click="recordLeadCallOutcome('Answered')"
-                    />
-                    <Button
-                      :label="__('No Answer')"
-                      variant="subtle"
-                      @click="recordLeadCallOutcome('No Answer')"
-                    />
-                    <Button
-                      :label="__('WhatsApp Action')"
-                      variant="subtle"
-                      @click="recordLeadOutreachAction('WhatsApp')"
-                    />
-                    <Button
-                      :label="__('Email Action')"
-                      variant="subtle"
-                      @click="recordLeadOutreachAction('Email')"
-                    />
+                  <div v-if="doc.lead_age" class="rounded bg-surface-gray-2 px-3 py-1.5 text-xs font-medium text-ink-gray-7">
+                    {{ __('Age') }}: {{ doc.lead_age }}
+                  </div>
+                </div>
+                <!-- Gated Action Buttons -->
+                <div class="flex flex-wrap gap-2">
+                  <!-- Fresh Lead: Only Call and WhatsApp -->
+                  <Button
+                    :label="__('Call')"
+                    variant="solid"
+                    @click="triggerLeadCall"
+                  />
+                  <Button
+                    :label="__('WhatsApp Message')"
+                    variant="subtle"
+                    @click="openWhatsAppWithSubject"
+                  />
+                  <!-- After call: Log Call button -->
+                  <Button
+                    :label="__('Log Call Result')"
+                    variant="solid"
+                    theme="orange"
+                    @click="openCallLogDialog"
+                  />
+                  <!-- Interested status: Schedule Next Action -->
+                  <Button
+                    v-if="isInterestedOrBeyond"
+                    :label="__('Schedule Next Action')"
+                    variant="solid"
+                    theme="green"
+                    @click="openNextActionDialog"
+                  />
+                  <!-- Log Meeting Result (when events exist) -->
+                  <Button
+                    v-if="isInterestedOrBeyond"
+                    :label="__('Log Meeting Result')"
+                    variant="subtle"
+                    @click="openMeetingResultDialog"
+                  />
+                </div>
+              </div>
+
+              <!-- Card 2: Flags (No-Answer Tracking) -->
+              <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
+                <div class="mb-3">
+                  <div class="text-sm font-medium text-ink-gray-9">
+                    {{ __('Call Tracking Flags') }}
                   </div>
                 </div>
                 <div class="grid gap-3 text-sm md:grid-cols-3 xl:grid-cols-5">
@@ -125,7 +138,8 @@
                   </div>
                 </div>
               </div>
-              <!-- Card 2: Interest Details -->
+
+              <!-- Card 3: Interest Details -->
               <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
                 <div class="mb-3 flex items-center justify-between gap-3">
                   <div>
@@ -133,7 +147,7 @@
                       {{ __('Interest Details') }}
                     </div>
                     <div class="text-xs text-ink-gray-6">
-                      {{ __('Buyer requirements used before selecting inventory units.') }}
+                      {{ __('Buyer requirements and preferences.') }}
                     </div>
                   </div>
                   <Button
@@ -155,32 +169,34 @@
                   </div>
                 </div>
               </div>
-              <!-- Card 3: Add Inventory Units or Requests -->
+
+              <!-- Card 4: Add Inventory Units or Requests -->
               <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
                 <div class="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div class="text-sm font-medium text-ink-gray-9">
-                      {{ __('Add Inventory Units or Requests to Interest') }}
+                      {{ __('Linked Units & Requests') }}
                     </div>
                     <div class="text-xs text-ink-gray-6">
                       {{ __('Select available inventory units, or record a buyer request when the requirement is not currently in inventory.') }}
                     </div>
                   </div>
-                  <Button
-                    :label="__('Add Request (Not in Inventory)')"
-                    variant="subtle"
-                    @click="addInterestRequest"
-                  />
-                </div>
-                <div class="flex flex-col gap-3 lg:flex-row lg:items-start">
-                  <Button
-                    :label="__('Browse Inventory Units')"
-                    variant="solid"
-                    @click="openUnitSelectionPopup"
-                  />
+                  <div class="flex gap-2">
+                    <Button
+                      :label="__('Browse Units')"
+                      variant="solid"
+                      @click="openUnitSelectionPopup"
+                    />
+                    <Button
+                      :label="__('Add Request')"
+                      variant="subtle"
+                      @click="addInterestRequest"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
+            <!-- Linked Properties Table -->
             <div
               v-if="linkedProperties.loading"
               class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
@@ -348,20 +364,18 @@
                 <Button
                   :tooltip="__('Open WhatsApp Chat')"
                   :icon="WhatsAppIcon"
-                  @click="openWhatsAppChat"
+                  @click="openWhatsAppDirect"
                 />
                 <Button
                   :tooltip="__('Call Lead')"
                   :icon="PhoneIcon"
                   @click="triggerLeadCall"
                 />
-
                 <Button
                   :tooltip="__('Attach a File')"
                   :icon="AttachmentIcon"
                   @click="showFilesUploader = true"
                 />
-
                 <Button
                   v-if="canDelete"
                   :tooltip="__('Delete')"
@@ -459,7 +473,6 @@ import AssignTo from '@/components/AssignTo.vue'
 import FilesUploader from '@/components/FilesUploader/FilesUploader.vue'
 import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
-import TableMultiselectInput from '@/components/Controls/TableMultiselectInput.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
 import UnitSelectionDialog from '@/components/Modals/UnitSelectionDialog.vue'
@@ -513,7 +526,6 @@ const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
 const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
-const selectedInterestUnits = ref([])
 const showUnitSelectionDialog = ref(false)
 
 const {
@@ -531,6 +543,10 @@ const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 const doc = computed(() => document.doc || {})
 const isBuyerLead = computed(() => doc.value.party_type !== 'Seller')
 const isSellerLead = computed(() => doc.value.party_type === 'Seller')
+const isInterestedOrBeyond = computed(() => {
+  const s = doc.value.status
+  return s && !['Fresh Lead', 'No Answer'].includes(s)
+})
 
 onMounted(async () => {
   if (document.doc) await triggerOnRender()
@@ -647,6 +663,9 @@ const { tabIndex, changeTabTo } = useActiveTabManager(tabs, 'lastLeadTab')
 
 const activeTabName = computed(() => tabs.value[tabIndex.value]?.name)
 
+// ---------------------------------------------------------------------------
+// Resources
+// ---------------------------------------------------------------------------
 const linkedProperties = createResource({
   url: 'real_estate_crm_customs.api.get_lead_linked_units',
   cache: ['leadLinkedProperties', props.leadId],
@@ -679,56 +698,6 @@ const linkedPropertiesEmptyText = computed(() =>
     : __('No seller properties assigned to this lead yet.'),
 )
 
-const buyerInterestPreferenceRows = computed(() => [
-  {
-    label: __('Preferred Area'),
-    value: formatPreferredArea(),
-  },
-  {
-    label: __('Developer'),
-    value: doc.value.preferred_developer,
-  },
-  {
-    label: __('Compound'),
-    value: doc.value.preferred_compound,
-  },
-  {
-    label: __('Finishing Type'),
-    value: doc.value.preferred_finishing_type,
-  },
-  {
-    label: __('Delivery Time'),
-    value: doc.value.preferred_delivery_time,
-  },
-  {
-    label: __('Budget'),
-    value: formatPrice(doc.value.buyer_budget),
-  },
-])
-
-const callFlagsRows = computed(() => [
-  {
-    label: __('Current No-Answer Streak'),
-    value: doc.value.no_answer_consecutive_count || 0,
-  },
-  {
-    label: __('Total No-Answer History'),
-    value: doc.value.no_answer_total_count || 0,
-  },
-  {
-    label: __('1st Call No-Answer'),
-    value: doc.value.no_answer_first_call ? __('Yes') : __('No'),
-  },
-  {
-    label: __('2nd Call No-Answer'),
-    value: doc.value.no_answer_second_call ? __('Yes') : __('No'),
-  },
-  {
-    label: __('Last Call Outcome'),
-    value: doc.value.last_call_outcome || __('—'),
-  },
-])
-
 const sections = createResource({
   url: 'crm.fcrm.doctype.crm_fields_layout.crm_fields_layout.get_sidepanel_sections',
   cache: ['sidePanelSections', 'CRM Lead'],
@@ -736,6 +705,30 @@ const sections = createResource({
   auto: true,
 })
 
+// ---------------------------------------------------------------------------
+// Computed Rows
+// ---------------------------------------------------------------------------
+const buyerInterestPreferenceRows = computed(() => [
+  { label: __('Preferred Area'), value: formatPreferredArea() },
+  { label: __('Developer'), value: doc.value.preferred_developer },
+  { label: __('Compound'), value: doc.value.preferred_compound },
+  { label: __('Finishing Type'), value: doc.value.preferred_finishing_type },
+  { label: __('Delivery Time'), value: doc.value.preferred_delivery_time },
+  { label: __('Budget'), value: formatPrice(doc.value.buyer_budget) },
+  { label: __('Primary Buyer'), value: doc.value.is_primary_buyer ? __('Yes') : __('No') },
+])
+
+const callFlagsRows = computed(() => [
+  { label: __('Current No-Answer Streak'), value: doc.value.no_answer_consecutive_count || 0 },
+  { label: __('Total No-Answer History'), value: doc.value.no_answer_total_count || 0 },
+  { label: __('1st Call No-Answer'), value: doc.value.no_answer_first_call ? __('Yes') : __('No') },
+  { label: __('2nd Call No-Answer'), value: doc.value.no_answer_second_call ? __('Yes') : __('No') },
+  { label: __('Last Call Outcome'), value: doc.value.last_call_outcome || __('—') },
+])
+
+// ---------------------------------------------------------------------------
+// Format Helpers
+// ---------------------------------------------------------------------------
 function formatPrice(value) {
   if (value === null || value === undefined || value === '') return __('—')
   return value
@@ -755,6 +748,9 @@ function isRequestInterest(row) {
   return row?.interest_record_type === 'Request'
 }
 
+// ---------------------------------------------------------------------------
+// State Update Helper
+// ---------------------------------------------------------------------------
 function updateLeadActionState(result) {
   if (!result) return
   ;[
@@ -765,6 +761,7 @@ function updateLeadActionState(result) {
     'no_answer_total_count',
     'last_call_outcome',
     'last_call_at',
+    'is_primary_buyer',
   ].forEach((fieldname) => {
     if (Object.hasOwn(result, fieldname)) {
       doc.value[fieldname] = result[fieldname]
@@ -772,88 +769,428 @@ function updateLeadActionState(result) {
   })
 }
 
-async function recordLeadCallOutcome(outcome) {
+// ---------------------------------------------------------------------------
+// 1. WhatsApp with Subject (Gated Action)
+// ---------------------------------------------------------------------------
+async function openWhatsAppWithSubject() {
+  let values = await renderFieldLayoutDialog({
+    title: __('WhatsApp Message — Enter Subject'),
+    fields: [
+      {
+        fieldname: 'subject',
+        fieldtype: 'Small Text',
+        label: __('Message Subject / Content'),
+        reqd: 1,
+        default: __('Hello, this is a follow-up regarding your real estate inquiry.'),
+      },
+    ],
+    submitLabel: __('Open WhatsApp'),
+  })
+
+  if (!values?.subject) return
+
   try {
-    const result = await call('real_estate_crm_customs.api.record_lead_call_outcome', {
+    const result = await call('real_estate_crm_customs.api.record_whatsapp_subject', {
       lead: props.leadId,
-      outcome,
+      subject: values.subject,
+    })
+    activities.value?.all_activities?.reload?.()
+    if (result?.whatsapp_url) {
+      window.open(result.whatsapp_url, '_blank')
+    }
+    toast.success(__('WhatsApp message recorded and chat opened'))
+  } catch (err) {
+    toast.error(err.messages?.[0] || err.message || __('Error recording WhatsApp message'))
+  }
+}
+
+// Direct WhatsApp (sidebar button — no subject recording)
+function openWhatsAppDirect() {
+  const phone = doc.value.whatsapp_number || doc.value.mobile_no
+  if (!phone) {
+    toast.error(__('Please set a WhatsApp number or mobile number for this lead'))
+    return
+  }
+  const cleanPhone = phone.replace(/[\s\-+]/g, '')
+  window.open(`https://wa.me/${cleanPhone}`, '_blank')
+}
+
+// ---------------------------------------------------------------------------
+// 2. Call (trigger phone call)
+// ---------------------------------------------------------------------------
+function triggerLeadCall() {
+  const phone = doc.value.mobile_no || doc.value.whatsapp_number
+  if (!phone) {
+    toast.error(__('Please set a mobile number for this lead'))
+    return
+  }
+  if (callEnabled.value) {
+    makeCall(phone)
+    return
+  }
+  window.open(`tel:${phone}`, '_self')
+}
+
+// ---------------------------------------------------------------------------
+// 3. Call Log Dialog — Sequential: Outcome → Interest → Next Action
+// ---------------------------------------------------------------------------
+async function openCallLogDialog() {
+  // Step 1: Ask for call outcome
+  let outcomeValues = await renderFieldLayoutDialog({
+    title: __('Log Call Result'),
+    fields: [
+      {
+        fieldname: 'outcome',
+        fieldtype: 'Select',
+        label: __('Call Outcome'),
+        options: '\nAnswered\nNo Answer',
+        reqd: 1,
+      },
+    ],
+    submitLabel: __('Continue'),
+  })
+
+  if (!outcomeValues?.outcome) return
+
+  if (outcomeValues.outcome === 'No Answer') {
+    // No Answer path: update flags + schedule next call
+    let scheduleValues = await renderFieldLayoutDialog({
+      title: __('Schedule Next Call Attempt'),
+      fields: [
+        {
+          fieldname: 'schedule_next_call',
+          fieldtype: 'Datetime',
+          label: __('Next Call Date & Time'),
+          reqd: 1,
+        },
+      ],
+      submitLabel: __('Save & Schedule'),
+    })
+
+    try {
+      const result = await call('real_estate_crm_customs.api.record_call_outcome', {
+        lead: props.leadId,
+        outcome: 'No Answer',
+        schedule_next_call: scheduleValues?.schedule_next_call || null,
+      })
+      updateLeadActionState(result)
+      sections.reload()
+      document.reload?.()
+      activities.value?.all_activities?.reload?.()
+      toast.success(__('No-answer recorded. Next call scheduled.'))
+    } catch (err) {
+      toast.error(err.messages?.[0] || err.message || __('Error recording call outcome'))
+    }
+    return
+  }
+
+  // Answered path: record outcome first
+  try {
+    const result = await call('real_estate_crm_customs.api.record_call_outcome', {
+      lead: props.leadId,
+      outcome: 'Answered',
     })
     updateLeadActionState(result)
     sections.reload()
     document.reload?.()
     activities.value?.all_activities?.reload?.()
-    toast.success(
-      outcome === 'No Answer'
-        ? __('No-answer call recorded and Lead status synced')
-        : __('Answered call recorded, active no-answer counter reset, and Lead status synced'),
-    )
   } catch (err) {
-    toast.error(
-      err.messages?.[0] || err.message || __('Error recording call outcome'),
-    )
+    toast.error(err.messages?.[0] || err.message || __('Error recording call outcome'))
+    return
   }
+
+  // Step 2: Interest Determination Dialog
+  await openInterestDeterminationDialog()
 }
 
-async function recordNoAnswerAttempt() {
-  await recordLeadCallOutcome('No Answer')
-}
-
-async function recordLeadOutreachAction(channel) {
-  const isEmail = channel === 'Email'
-  let values = await renderFieldLayoutDialog({
-    title: isEmail ? __('Send Email Action') : __('Send WhatsApp Action'),
+// ---------------------------------------------------------------------------
+// 4. Interest Determination Dialog
+// ---------------------------------------------------------------------------
+async function openInterestDeterminationDialog() {
+  let interestValues = await renderFieldLayoutDialog({
+    title: __('Interest Determination'),
+    size: 'xl',
     fields: [
-      ...(isEmail
-        ? [
-            {
-              fieldname: 'subject',
-              fieldtype: 'Data',
-              label: __('Subject'),
-              default: __('Follow up for {0}', [title.value]),
-              reqd: 1,
-            },
-          ]
-        : []),
       {
-        fieldname: 'message',
-        fieldtype: 'Small Text',
-        label: __('Message'),
-        default: __('Hello {0}, this is a follow-up from your assigned real estate agent.', [title.value]),
+        fieldname: 'interested',
+        fieldtype: 'Select',
+        label: __('Is the client interested?'),
+        options: '\nYes\nNo',
         reqd: 1,
       },
       {
-        fieldname: 'send',
+        fieldname: 'is_primary_buyer',
         fieldtype: 'Check',
-        label: __('Send now through the system'),
-        default: 1,
+        label: __('Is Primary Buyer?'),
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'interested_unit_area',
+        fieldtype: 'Float',
+        label: __('Interested Unit Area'),
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'area_unit',
+        fieldtype: 'Select',
+        label: __('Area Unit'),
+        options: 'Sq M\nSq Ft',
+        default: 'Sq M',
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'preferred_area',
+        fieldtype: 'Data',
+        label: __('Preferred Location/Area'),
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'preferred_developer',
+        fieldtype: 'Link',
+        label: __('Developer'),
+        options: 'Property Developer',
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'preferred_compound',
+        fieldtype: 'Link',
+        label: __('Compound / Project'),
+        options: 'Real Estate Project',
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'preferred_finishing_type',
+        fieldtype: 'Select',
+        label: __('Finishing Type'),
+        options: '\nCore & Shell\nSemi-Finished\nFully Finished',
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'preferred_delivery_time',
+        fieldtype: 'Data',
+        label: __('Delivery Time'),
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'buyer_budget',
+        fieldtype: 'Currency',
+        label: __('Budget'),
+        depends_on: "eval:doc.interested=='Yes'",
+      },
+      {
+        fieldname: 'request_notes',
+        fieldtype: 'Small Text',
+        label: __('Customer Request (if not in inventory)'),
+        depends_on: "eval:doc.interested=='Yes'",
       },
     ],
-    submitLabel: isEmail ? __('Send Email') : __('Send WhatsApp'),
+    submitLabel: __('Save Interest'),
   })
 
-  if (!values?.message) return
+  if (!interestValues?.interested) return
+
+  const isInterested = interestValues.interested === 'Yes' ? 1 : 0
 
   try {
-    const result = await call('real_estate_crm_customs.api.record_lead_outreach_action', {
+    const interestData = isInterested ? {
+      interested_unit_area: interestValues.interested_unit_area,
+      area_unit: interestValues.area_unit,
+      preferred_area: interestValues.preferred_area,
+      preferred_developer: interestValues.preferred_developer,
+      preferred_compound: interestValues.preferred_compound,
+      preferred_finishing_type: interestValues.preferred_finishing_type,
+      preferred_delivery_time: interestValues.preferred_delivery_time,
+      buyer_budget: interestValues.buyer_budget,
+      request_notes: interestValues.request_notes || null,
+    } : null
+
+    const result = await call('real_estate_crm_customs.api.record_interest_determination', {
       lead: props.leadId,
-      channel,
-      subject: values.subject,
-      message: values.message,
-      send: values.send ? 1 : 0,
+      interested: isInterested,
+      is_primary_buyer: interestValues.is_primary_buyer ? 1 : 0,
+      interest_data: interestData ? JSON.stringify(interestData) : null,
+    })
+    updateLeadActionState(result)
+    sections.reload()
+    document.reload?.()
+    linkedProperties.reload()
+    activities.value?.all_activities?.reload?.()
+
+    if (!isInterested) {
+      toast.success(__('Lead marked as Not Interested.'))
+      return
+    }
+
+    toast.success(__('Lead marked as Interested. Now schedule the next action.'))
+  } catch (err) {
+    toast.error(err.messages?.[0] || err.message || __('Error recording interest'))
+    return
+  }
+
+  // Step 3: Next Action Dialog (mandatory after interest)
+  await openNextActionDialog()
+}
+
+// ---------------------------------------------------------------------------
+// 5. Next Action Scheduling Dialog
+// ---------------------------------------------------------------------------
+async function openNextActionDialog() {
+  let values = await renderFieldLayoutDialog({
+    title: __('Schedule Next Action'),
+    size: 'lg',
+    fields: [
+      {
+        fieldname: 'action_type',
+        fieldtype: 'Select',
+        label: __('Action Type'),
+        options: '\nCall\nMeeting\nShowing\nSend Offer',
+        reqd: 1,
+      },
+      {
+        fieldname: 'starts_on',
+        fieldtype: 'Datetime',
+        label: __('Scheduled Date & Time'),
+        reqd: 1,
+      },
+      {
+        fieldname: 'subject',
+        fieldtype: 'Data',
+        label: __('Subject / Title'),
+      },
+      {
+        fieldname: 'notes',
+        fieldtype: 'Small Text',
+        label: __('Notes'),
+      },
+      {
+        fieldname: 'target_unit',
+        fieldtype: 'Link',
+        label: __('Target Unit (for Showing)'),
+        options: 'Real Estate Unit',
+        depends_on: "eval:doc.action_type=='Showing'",
+        mandatory_depends_on: "eval:doc.action_type=='Showing'",
+      },
+    ],
+    submitLabel: __('Schedule'),
+  })
+
+  if (!values?.action_type || !values?.starts_on) return
+
+  try {
+    const result = await call('real_estate_crm_customs.api.schedule_next_action', {
+      lead: props.leadId,
+      action_type: values.action_type,
+      starts_on: values.starts_on,
+      subject: values.subject || null,
+      notes: values.notes || null,
+      target_unit: values.target_unit || null,
     })
     activities.value?.all_activities?.reload?.()
-    toast.success(
-      result?.sent
-        ? __('{0} action sent from assigned agent identity', [channel])
-        : __('{0} action recorded for assigned agent identity', [channel]),
-    )
+    document.reload?.()
+    let msg = __('Next action scheduled: {0}', [values.action_type])
+    if (result?.unit_showing_recorded) {
+      msg += ' ' + __('(Showing recorded on unit and seller lead)')
+    }
+    toast.success(msg)
   } catch (err) {
-    toast.error(
-      err.messages?.[0] || err.message || __('Error recording outreach action'),
-    )
+    toast.error(err.messages?.[0] || err.message || __('Error scheduling next action'))
   }
 }
 
+// ---------------------------------------------------------------------------
+// 6. Meeting/Showing Result Dialog
+// ---------------------------------------------------------------------------
+async function openMeetingResultDialog() {
+  // First fetch upcoming events for this lead
+  let events = []
+  try {
+    events = await call('real_estate_crm_customs.api.get_lead_upcoming_events', {
+      lead: props.leadId,
+    })
+  } catch (err) {
+    toast.error(__('Could not load events'))
+    return
+  }
+
+  if (!events || !events.length) {
+    toast.info(__('No pending meetings or showings to log results for.'))
+    return
+  }
+
+  // Build event options
+  const eventOptions = events.map(e => `${e.name} — ${e.subject} (${e.starts_on})`).join('\n')
+
+  let values = await renderFieldLayoutDialog({
+    title: __('Log Meeting / Showing Result'),
+    size: 'lg',
+    fields: [
+      {
+        fieldname: 'event_selection',
+        fieldtype: 'Select',
+        label: __('Select Event'),
+        options: '\n' + eventOptions,
+        reqd: 1,
+      },
+      {
+        fieldname: 'result',
+        fieldtype: 'Select',
+        label: __('Result'),
+        options: '\nDone\nCancelled\nRescheduled',
+        reqd: 1,
+      },
+      {
+        fieldname: 'result_note',
+        fieldtype: 'Small Text',
+        label: __('Result Notes (mandatory if Done)'),
+        mandatory_depends_on: "eval:doc.result=='Done'",
+      },
+      {
+        fieldname: 'reschedule_to',
+        fieldtype: 'Datetime',
+        label: __('Reschedule To (new date/time)'),
+        depends_on: "eval:doc.result=='Rescheduled'",
+        mandatory_depends_on: "eval:doc.result=='Rescheduled'",
+      },
+      {
+        fieldname: 'target_unit',
+        fieldtype: 'Link',
+        label: __('Related Unit (if Showing)'),
+        options: 'Real Estate Unit',
+      },
+    ],
+    submitLabel: __('Log Result'),
+  })
+
+  if (!values?.event_selection || !values?.result) return
+
+  // Extract event name from selection
+  const eventName = values.event_selection.split(' — ')[0]
+
+  try {
+    const result = await call('real_estate_crm_customs.api.log_meeting_result', {
+      lead: props.leadId,
+      event_name: eventName,
+      result: values.result,
+      result_note: values.result_note || null,
+      reschedule_to: values.reschedule_to || null,
+      target_unit: values.target_unit || null,
+    })
+    activities.value?.all_activities?.reload?.()
+    document.reload?.()
+    toast.success(__('Meeting result logged: {0}', [values.result]))
+
+    // After Done or Cancelled → prompt next action
+    if (values.result === 'Done' || values.result === 'Cancelled') {
+      await openNextActionDialog()
+    }
+  } catch (err) {
+    toast.error(err.messages?.[0] || err.message || __('Error logging meeting result'))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Interest Preferences Edit (standalone)
+// ---------------------------------------------------------------------------
 async function editBuyerInterestPreferences() {
   if (!isBuyerLead.value) {
     toast.error(__('Only buyer leads can have interest details'))
@@ -874,50 +1211,14 @@ async function editBuyerInterestPreferences() {
       buyer_budget: doc.value.buyer_budget,
     },
     fields: [
-      {
-        fieldname: 'interested_unit_area',
-        fieldtype: 'Float',
-        label: __('Interested Unit Area'),
-      },
-      {
-        fieldname: 'area_unit',
-        fieldtype: 'Select',
-        label: __('Area Unit'),
-        options: 'Sq M\nSq Ft',
-      },
-      {
-        fieldname: 'preferred_area',
-        fieldtype: 'Data',
-        label: __('Area'),
-      },
-      {
-        fieldname: 'preferred_developer',
-        fieldtype: 'Link',
-        label: __('Developer'),
-        options: 'Property Developer',
-      },
-      {
-        fieldname: 'preferred_compound',
-        fieldtype: 'Link',
-        label: __('Compound / Project'),
-        options: 'Real Estate Project',
-      },
-      {
-        fieldname: 'preferred_finishing_type',
-        fieldtype: 'Select',
-        label: __('Finishing Type'),
-        options: '\nCore & Shell\nSemi-Finished\nFully Finished',
-      },
-      {
-        fieldname: 'preferred_delivery_time',
-        fieldtype: 'Data',
-        label: __('Delivery Time'),
-      },
-      {
-        fieldname: 'buyer_budget',
-        fieldtype: 'Currency',
-        label: __('Budget'),
-      },
+      { fieldname: 'interested_unit_area', fieldtype: 'Float', label: __('Interested Unit Area') },
+      { fieldname: 'area_unit', fieldtype: 'Select', label: __('Area Unit'), options: 'Sq M\nSq Ft' },
+      { fieldname: 'preferred_area', fieldtype: 'Data', label: __('Area') },
+      { fieldname: 'preferred_developer', fieldtype: 'Link', label: __('Developer'), options: 'Property Developer' },
+      { fieldname: 'preferred_compound', fieldtype: 'Link', label: __('Compound / Project'), options: 'Real Estate Project' },
+      { fieldname: 'preferred_finishing_type', fieldtype: 'Select', label: __('Finishing Type'), options: '\nCore & Shell\nSemi-Finished\nFully Finished' },
+      { fieldname: 'preferred_delivery_time', fieldtype: 'Data', label: __('Delivery Time') },
+      { fieldname: 'buyer_budget', fieldtype: 'Currency', label: __('Budget') },
     ],
     submitLabel: __('Save Interest Details'),
   })
@@ -940,12 +1241,9 @@ async function editBuyerInterestPreferences() {
   })
 }
 
-function getSelectedInterestUnitName(row) {
-  if (!row) return null
-  if (typeof row === 'string') return row
-  return row.unit || row.value || row.name || row.real_estate_unit || null
-}
-
+// ---------------------------------------------------------------------------
+// Add Interest Request (standalone)
+// ---------------------------------------------------------------------------
 async function addInterestRequest() {
   if (!isBuyerLead.value) {
     toast.error(__('Only buyer leads can have request-only interest records'))
@@ -955,19 +1253,8 @@ async function addInterestRequest() {
   let values = await renderFieldLayoutDialog({
     title: __('Add Request Not in Inventory'),
     fields: [
-      {
-        fieldname: 'request_notes',
-        fieldtype: 'Small Text',
-        label: __('Request Notes'),
-        reqd: 1,
-      },
-      {
-        fieldname: 'request_status',
-        fieldtype: 'Select',
-        label: __('Request Status'),
-        options: '\nOpen\nFulfilled\nCancelled',
-        default: 'Open',
-      },
+      { fieldname: 'request_notes', fieldtype: 'Small Text', label: __('Request Notes'), reqd: 1 },
+      { fieldname: 'request_status', fieldtype: 'Select', label: __('Request Status'), options: '\nOpen\nFulfilled\nCancelled', default: 'Open' },
     ],
     submitLabel: __('Add Request'),
   })
@@ -984,45 +1271,26 @@ async function addInterestRequest() {
     document.reload?.()
     toast.success(__('Buyer request added to the interest list'))
   } catch (err) {
-    toast.error(
-      err.messages?.[0] || err.message || __('Error adding buyer request'),
-    )
+    toast.error(err.messages?.[0] || err.message || __('Error adding buyer request'))
   }
 }
 
-async function addSelectedInterestedUnits() {
-  if (!selectedInterestUnits.value.length) {
-    toast.error(__('Please select at least one inventory unit'))
-    return
-  }
-
-  const units = selectedInterestUnits.value
-    .map(getSelectedInterestUnitName)
-    .filter(Boolean)
-
-  if (!units.length) {
-    toast.error(__('Selected rows do not contain valid inventory units'))
-    return
-  }
-
-  try {
-    await call('real_estate_crm_customs.api.link_interested_units', {
-      lead: props.leadId,
-      units: JSON.stringify([...new Set(units)]),
-    })
-    selectedInterestUnits.value = []
-    linkedProperties.reload()
-    document.reload?.()
-    toast.success(__('Selected inventory units added to the buyer interest list'))
-  } catch (err) {
-    toast.error(
-      err.messages?.[0] ||
-        err.message ||
-        __('Error adding selected inventory units'),
-    )
-  }
+// ---------------------------------------------------------------------------
+// Unit Selection Popup
+// ---------------------------------------------------------------------------
+function openUnitSelectionPopup() {
+  showUnitSelectionDialog.value = true
 }
 
+function onUnitsAdded() {
+  linkedProperties.reload()
+  document.reload?.()
+  toast.success(__('Selected inventory units added to the buyer interest list'))
+}
+
+// ---------------------------------------------------------------------------
+// Seller: Assign Property Unit
+// ---------------------------------------------------------------------------
 async function assignPropertyUnitToSeller() {
   if (doc.value.party_type !== 'Seller') {
     toast.error(__('Only seller leads can be assigned property units'))
@@ -1055,6 +1323,9 @@ async function assignPropertyUnitToSeller() {
   toast.success(__('Property unit assigned to this seller lead'))
 }
 
+// ---------------------------------------------------------------------------
+// Generic Field Update & Status
+// ---------------------------------------------------------------------------
 async function triggerStatusChange(value) {
   await triggerOnChange('status', value)
   setLostReason()
@@ -1085,51 +1356,6 @@ function updateField(name, value) {
 
 function deleteLead() {
   showDeleteLinkedDocModal.value = true
-}
-
-function openWhatsAppChat() {
-  const phone = doc.value.whatsapp_number || doc.value.mobile_no
-  if (!phone) {
-    toast.error(__('Please set a WhatsApp number or mobile number for this lead'))
-    return
-  }
-  // Clean phone number: remove spaces, dashes, and leading +
-  const cleanPhone = phone.replace(/[\s\-+]/g, '')
-  // Use wa.me deep link which works on Android, iOS, and desktop
-  window.open(`https://wa.me/${cleanPhone}`, '_blank')
-}
-
-function triggerLeadCall() {
-  const phone = doc.value.mobile_no || doc.value.whatsapp_number
-  if (!phone) {
-    toast.error(__('Please set a mobile number for this lead'))
-    return
-  }
-  // If CRM telephony is enabled, use the built-in makeCall
-  if (callEnabled.value) {
-    makeCall(phone)
-    return
-  }
-  // Fallback: use tel: URI which works on Android, iOS, and desktop
-  window.open(`tel:${phone}`, '_self')
-}
-
-function openUnitSelectionPopup() {
-  showUnitSelectionDialog.value = true
-}
-
-function onUnitsAdded() {
-  linkedProperties.reload()
-  document.reload?.()
-  toast.success(__('Selected inventory units added to the buyer interest list'))
-}
-
-function openEmailBox() {
-  let currentTab = tabs.value[tabIndex.value]
-  if (!['Emails', 'Comments', 'Activities'].includes(currentTab.name)) {
-    activities.value.changeTabTo('emails')
-  }
-  nextTick(() => (activities.value.emailBox.show = true))
 }
 
 function statusLabel(status) {
