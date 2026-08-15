@@ -710,6 +710,7 @@ const sections = createResource({
 // ---------------------------------------------------------------------------
 const buyerInterestPreferenceRows = computed(() => [
   { label: __('Preferred Area'), value: formatPreferredArea() },
+  { label: __('Unit Type'), value: doc.value.preferred_unit_type },
   { label: __('Developer'), value: doc.value.preferred_developer },
   { label: __('Compound'), value: doc.value.preferred_compound },
   { label: __('Finishing Type'), value: doc.value.preferred_finishing_type },
@@ -735,8 +736,8 @@ function formatPrice(value) {
 }
 
 function formatPreferredArea() {
-  if (!doc.value.interested_unit_area) return ''
-  return [doc.value.interested_unit_area, doc.value.area_unit].filter(Boolean).join(' ')
+  if (!doc.value.preferred_area && !doc.value.buyer_budget) return ''
+  return [doc.value.preferred_area, doc.value.area_unit].filter(Boolean).join(' ')
 }
 
 function formatUnitArea(row) {
@@ -925,9 +926,9 @@ async function openInterestDeterminationDialog() {
         depends_on: "eval:doc.interested=='Yes'",
       },
       {
-        fieldname: 'interested_unit_area',
+        fieldname: 'preferred_unit_area',
         fieldtype: 'Float',
-        label: __('Interested Unit Area'),
+        label: __('Unit Area (sqm/sqft)'),
         depends_on: "eval:doc.interested=='Yes'",
       },
       {
@@ -993,7 +994,6 @@ async function openInterestDeterminationDialog() {
 
   try {
     const interestData = isInterested ? {
-      interested_unit_area: interestValues.interested_unit_area,
       area_unit: interestValues.area_unit,
       preferred_area: interestValues.preferred_area,
       preferred_developer: interestValues.preferred_developer,
@@ -1201,9 +1201,9 @@ async function editBuyerInterestPreferences() {
     title: __('Edit Interest Details'),
     size: 'xl',
     defaults: {
-      interested_unit_area: doc.value.interested_unit_area,
       area_unit: doc.value.area_unit || 'Sq M',
       preferred_area: doc.value.preferred_area,
+      preferred_unit_type: doc.value.preferred_unit_type,
       preferred_developer: doc.value.preferred_developer,
       preferred_compound: doc.value.preferred_compound,
       preferred_finishing_type: doc.value.preferred_finishing_type,
@@ -1211,9 +1211,9 @@ async function editBuyerInterestPreferences() {
       buyer_budget: doc.value.buyer_budget,
     },
     fields: [
-      { fieldname: 'interested_unit_area', fieldtype: 'Float', label: __('Interested Unit Area') },
+      { fieldname: 'preferred_area', fieldtype: 'Data', label: __('Preferred Location / Area') },
       { fieldname: 'area_unit', fieldtype: 'Select', label: __('Area Unit'), options: 'Sq M\nSq Ft' },
-      { fieldname: 'preferred_area', fieldtype: 'Data', label: __('Area') },
+      { fieldname: 'preferred_unit_type', fieldtype: 'Select', label: __('Unit Type'), options: '\nApartment\nDuplex\nTownhouse\nVilla\nChalet\nStudio\nPenthouse' },
       { fieldname: 'preferred_developer', fieldtype: 'Link', label: __('Developer'), options: 'Property Developer' },
       { fieldname: 'preferred_compound', fieldtype: 'Link', label: __('Compound / Project'), options: 'Real Estate Project' },
       { fieldname: 'preferred_finishing_type', fieldtype: 'Select', label: __('Finishing Type'), options: '\nCore & Shell\nSemi-Finished\nFully Finished' },
