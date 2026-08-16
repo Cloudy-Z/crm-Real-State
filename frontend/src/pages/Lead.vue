@@ -807,29 +807,33 @@ async function openWhatsAppWithSubject() {
 
 // Direct WhatsApp (sidebar button — no subject recording)
 function openWhatsAppDirect() {
-  const phone = doc.value.whatsapp_number || doc.value.mobile_no
-  if (!phone) {
+  const code = doc.value.whatsapp_country_code || doc.value.mobile_country_code || ''
+  const number = doc.value.whatsapp_number || doc.value.mobile_no
+  if (!number) {
     toast.error(__('Please set a WhatsApp number or mobile number for this lead'))
     return
   }
-  const cleanPhone = phone.replace(/[\s\-+]/g, '')
-  window.open(`https://wa.me/${cleanPhone}`, '_blank')
+  // Combine country code + number, strip any non-digit chars for wa.me
+  const fullPhone = (code + number).replace(/[^\d]/g, '')
+  window.open(`https://wa.me/${fullPhone}`, '_blank')
 }
 
 // ---------------------------------------------------------------------------
 // 2. Call (trigger phone call)
 // ---------------------------------------------------------------------------
 function triggerLeadCall() {
-  const phone = doc.value.mobile_no || doc.value.whatsapp_number
-  if (!phone) {
+  const code = doc.value.mobile_country_code || doc.value.whatsapp_country_code || ''
+  const number = doc.value.mobile_no || doc.value.whatsapp_number
+  if (!number) {
     toast.error(__('Please set a mobile number for this lead'))
     return
   }
+  const fullPhone = code + number
   if (callEnabled.value) {
-    makeCall(phone)
+    makeCall(fullPhone)
     return
   }
-  window.open(`tel:${phone}`, '_self')
+  window.open(`tel:${fullPhone}`, '_self')
 }
 
 // ---------------------------------------------------------------------------
