@@ -134,8 +134,7 @@
    "fieldname": "mobile_no",
    "fieldtype": "Data",
    "label": "Mobile No.",
-   "options": "",
-   "description": "Enter number without country code (e.g. 1001234567)"
+   "options": "Phone"
   },
   {
    "fieldname": "section_break_uixv",
