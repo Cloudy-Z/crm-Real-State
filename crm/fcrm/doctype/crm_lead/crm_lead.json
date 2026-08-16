@@ -31,7 +31,6 @@
   "naming_series",
   "middle_name",
   "gender",
-  "phone",
   "column_break_dbsv",
   "status",
   "no_of_employees",
@@ -135,12 +134,6 @@
    "fieldname": "mobile_no",
    "fieldtype": "Data",
    "label": "Mobile No.",
-   "options": "Phone"
-  },
-  {
-   "fieldname": "phone",
-   "fieldtype": "Data",
-   "label": "Phone",
    "options": "Phone"
   },
   {

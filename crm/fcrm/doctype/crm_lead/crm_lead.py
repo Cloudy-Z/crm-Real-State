@@ -57,7 +57,6 @@ class CRMLead(Document):
 		net_total: DF.Currency
 		no_of_employees: DF.Literal["1-10", "11-50", "51-200", "201-500", "501-1000", "1000+"]
 		organization: DF.Data | None
-		phone: DF.Data | None
 		products: DF.Table[CRMProducts]
 		response_by: DF.Datetime | None
 		rolling_responses: DF.Table[CRMRollingResponseTime]
@@ -227,11 +226,8 @@ class CRMLead(Document):
 		if self.email:
 			contact.append("email_ids", {"email_id": self.email, "is_primary": 1})
 
-		if self.phone:
-			contact.append("phone_nos", {"phone": self.phone, "is_primary_phone": 1})
-
 		if self.mobile_no:
-			contact.append("phone_nos", {"phone": self.mobile_no, "is_primary_mobile_no": 1})
+			contact.append("phone_nos", {"phone": self.mobile_no, "is_primary_phone": 1, "is_primary_mobile_no": 1})
 
 		contact.insert(ignore_permissions=True)
 		contact.reload()  # load changes by hooks on contact
@@ -278,15 +274,14 @@ class CRMLead(Document):
 
 	def contact_exists(self, throw=True):
 		email_exist = frappe.db.exists("Contact Email", {"email_id": self.email})
-		phone_exist = frappe.db.exists("Contact Phone", {"phone": self.phone})
 		mobile_exist = frappe.db.exists("Contact Phone", {"phone": self.mobile_no})
 
 		doctype = "Contact Email" if email_exist else "Contact Phone"
-		name = email_exist or phone_exist or mobile_exist
+		name = email_exist or mobile_exist
 
 		if name:
-			text = "Email" if email_exist else "Phone" if phone_exist else "Mobile No"
-			data = self.email if email_exist else self.phone if phone_exist else self.mobile_no
+			text = "Email" if email_exist else "Mobile No"
+			data = self.email if email_exist else self.mobile_no
 
 			value = "{0}: {1}".format(text, data)
 
@@ -328,7 +323,6 @@ class CRMLead(Document):
 			"status",
 			"email",
 			"mobile_no",
-			"phone",
 			"sla",
 			"sla_status",
 			"response_by",
