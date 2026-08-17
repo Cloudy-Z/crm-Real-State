@@ -132,8 +132,9 @@
   },
   {
    "fieldname": "mobile_no",
-   "fieldtype": "Phone",
-   "label": "Mobile No."
+   "fieldtype": "Data",
+   "label": "Mobile No.",
+   "options": "Phone"
   },
   {
    "fieldname": "section_break_uixv",
