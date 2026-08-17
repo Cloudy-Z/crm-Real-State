@@ -133,8 +133,7 @@
   {
    "fieldname": "mobile_no",
    "fieldtype": "Phone",
-   "label": "Mobile No.",
-   "length": 20
+   "label": "Mobile No."
   },
   {
    "fieldname": "section_break_uixv",
