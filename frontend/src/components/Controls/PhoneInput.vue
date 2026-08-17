@@ -203,7 +203,8 @@ function onBlur() {
 function getCombinedValue() {
   const num = localNumber.value.replace(/[\s\-]/g, '')
   if (!num) return ''
-  return selectedCountry.value.code + num
+  // Store in Frappe Desk Phone format: +CC-XXXXXXXXXX
+  return selectedCountry.value.code + '-' + num
 }
 
 function emitValue() {

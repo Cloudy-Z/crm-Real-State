@@ -812,8 +812,8 @@ function openWhatsAppDirect() {
     toast.error(__('Please set a WhatsApp number or mobile number for this lead'))
     return
   }
-  // Phone fieldtype stores full international number (e.g. +201070009839)
-  // Strip non-digit chars for wa.me URL
+  // Phone fieldtype stores as +CC-XXXXXXXXXX (e.g. +20-1070009839)
+  // Strip non-digit chars for wa.me URL (needs just digits with country code)
   const fullPhone = number.replace(/[^\d]/g, '')
   window.open(`https://wa.me/${fullPhone}`, '_blank')
 }
@@ -827,7 +827,9 @@ function triggerLeadCall() {
     toast.error(__('Please set a mobile number for this lead'))
     return
   }
-  const fullPhone = number
+  // Phone fieldtype stores as +CC-XXXXXXXXXX (e.g. +20-1070009839)
+  // For tel: URI, replace hyphen with nothing to get +CCXXXXXXXXXX
+  const fullPhone = number.replace(/-/g, '')
   if (callEnabled.value) {
     makeCall(fullPhone)
     return
