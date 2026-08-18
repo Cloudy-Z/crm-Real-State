@@ -720,11 +720,10 @@ const buyerInterestPreferenceRows = computed(() => [
 ])
 
 const callFlagsRows = computed(() => [
+  { label: __('Interest Status'), value: doc.value.interest_status || __('\u2014') },
   { label: __('Current No-Answer Streak'), value: doc.value.no_answer_consecutive_count || 0 },
   { label: __('Total No-Answer History'), value: doc.value.no_answer_total_count || 0 },
-  { label: __('1st Call No-Answer'), value: doc.value.no_answer_first_call ? __('Yes') : __('No') },
-  { label: __('2nd Call No-Answer'), value: doc.value.no_answer_second_call ? __('Yes') : __('No') },
-  { label: __('Last Call Outcome'), value: doc.value.last_call_outcome || __('—') },
+  { label: __('Last Call Outcome'), value: doc.value.last_call_outcome || __('\u2014') },
 ])
 
 // ---------------------------------------------------------------------------
@@ -756,15 +755,13 @@ function updateLeadActionState(result) {
   if (!result) return
   ;[
     'status',
-    'no_answer_first_call',
-    'no_answer_second_call',
     'no_answer_consecutive_count',
     'no_answer_total_count',
     'last_call_outcome',
     'last_call_at',
     'is_primary_buyer',
-    'is_interested',
-    'is_not_interested',
+    'interest_status',
+    'previous_status',
   ].forEach((fieldname) => {
     if (Object.hasOwn(result, fieldname)) {
       doc.value[fieldname] = result[fieldname]
