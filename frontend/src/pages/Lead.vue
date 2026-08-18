@@ -545,7 +545,7 @@ const isBuyerLead = computed(() => doc.value.party_type !== 'Seller')
 const isSellerLead = computed(() => doc.value.party_type === 'Seller')
 const isInterestedOrBeyond = computed(() => {
   const s = doc.value.status
-  return s && !['Fresh Lead', 'No Answer'].includes(s)
+  return s && !['New', 'Fresh Lead'].includes(s)
 })
 
 onMounted(async () => {
@@ -763,6 +763,8 @@ function updateLeadActionState(result) {
     'last_call_outcome',
     'last_call_at',
     'is_primary_buyer',
+    'is_interested',
+    'is_not_interested',
   ].forEach((fieldname) => {
     if (Object.hasOwn(result, fieldname)) {
       doc.value[fieldname] = result[fieldname]
