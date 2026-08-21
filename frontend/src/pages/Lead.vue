@@ -904,14 +904,63 @@ async function openCallLogDialog() {
     return
   }
 
-  // Step 2: Interest Determination Dialog
-  await openInterestDeterminationDialog()
+  // Step 2: Action Selection — agent MUST choose next action after answered call
+  let actionValues = await renderFieldLayoutDialog({
+    title: __('Call Answered — Select Next Action'),
+    fields: [
+      {
+        fieldname: 'next_action',
+        fieldtype: 'Select',
+        label: __('What would you like to do next?'),
+        options: '\nAdd Interest\nSchedule Meeting\nSchedule Showing\nSchedule Next Call',
+        reqd: 1,
+      },
+    ],
+    submitLabel: __('Continue'),
+  })
+
+  if (!actionValues?.next_action) return
+
+  if (actionValues.next_action === 'Add Interest') {
+    await openInterestDeterminationDialog()
+  } else if (actionValues.next_action === 'Schedule Meeting') {
+    await openNextActionDialog('Meeting')
+  } else if (actionValues.next_action === 'Schedule Showing') {
+    await openNextActionDialog('Showing')
+  } else if (actionValues.next_action === 'Schedule Next Call') {
+    await openNextActionDialog('Call')
+  }
 }
 
 // ---------------------------------------------------------------------------
 // 4. Interest Determination Dialog
 // ---------------------------------------------------------------------------
 async function openInterestDeterminationDialog() {
+  // P6: On 2nd+ call, ask Edit or Add if interests already exist
+  const existingInterests = doc.value.interested_in_units || []
+  if (existingInterests.length > 0) {
+    let choiceValues = await renderFieldLayoutDialog({
+      title: __('Interest Already Recorded'),
+      fields: [
+        {
+          fieldname: 'action',
+          fieldtype: 'Select',
+          label: __('This lead already has {0} interest record(s). What would you like to do?', [existingInterests.length]),
+          options: '\nAdd New Interest\nEdit Existing Interest',
+          reqd: 1,
+        },
+      ],
+      submitLabel: __('Continue'),
+    })
+    if (!choiceValues?.action) return
+    if (choiceValues.action === 'Edit Existing Interest') {
+      // Open the standalone edit preferences dialog
+      await editBuyerInterestPreferences()
+      return
+    }
+    // Otherwise fall through to add new interest
+  }
+
   let interestValues = await renderFieldLayoutDialog({
     title: __('Interest Determination'),
     size: 'xl',
@@ -983,10 +1032,38 @@ async function openInterestDeterminationDialog() {
         depends_on: "eval:doc.interested=='Yes'",
       },
       {
+        fieldname: 'interest_category',
+        fieldtype: 'Select',
+        label: __('Interest Category'),
+        options: '\nResale\nPrimary\nBrokerage Request\nInternational',
+        depends_on: "eval:doc.interested=='Yes'",
+        description: __('Resale = resale unit, Primary = open inventory, Brokerage = external request, International = abroad'),
+      },
+      {
         fieldname: 'request_notes',
         fieldtype: 'Small Text',
-        label: __('Customer Request (if not in inventory)'),
-        depends_on: "eval:doc.interested=='Yes'",
+        label: __('Customer Request Notes (for Brokerage Request)'),
+        depends_on: "eval:doc.interested=='Yes' && doc.interest_category=='Brokerage Request'",
+      },
+      {
+        fieldname: 'international_type',
+        fieldtype: 'Select',
+        label: __('International Type'),
+        options: '\nReal Estate\nStocks\nCharity Work\nOther',
+        depends_on: "eval:doc.interested=='Yes' && doc.interest_category=='International'",
+      },
+      {
+        fieldname: 'international_country',
+        fieldtype: 'Link',
+        label: __('Country'),
+        options: 'Country',
+        depends_on: "eval:doc.interested=='Yes' && doc.interest_category=='International'",
+      },
+      {
+        fieldname: 'international_details',
+        fieldtype: 'Small Text',
+        label: __('International Details'),
+        depends_on: "eval:doc.interested=='Yes' && doc.interest_category=='International'",
       },
     ],
     submitLabel: __('Save Interest'),
@@ -1005,7 +1082,11 @@ async function openInterestDeterminationDialog() {
       preferred_finishing_type: interestValues.preferred_finishing_type,
       preferred_delivery_time: interestValues.preferred_delivery_time,
       buyer_budget: interestValues.buyer_budget,
+      interest_category: interestValues.interest_category || 'Resale',
       request_notes: interestValues.request_notes || null,
+      international_type: interestValues.international_type || null,
+      international_country: interestValues.international_country || null,
+      international_details: interestValues.international_details || null,
     } : null
 
     const result = await call('real_estate_crm_customs.api.record_interest_determination', {
@@ -1038,7 +1119,7 @@ async function openInterestDeterminationDialog() {
 // ---------------------------------------------------------------------------
 // 5. Next Action Scheduling Dialog
 // ---------------------------------------------------------------------------
-async function openNextActionDialog() {
+async function openNextActionDialog(defaultActionType = null) {
   let values = await renderFieldLayoutDialog({
     title: __('Schedule Next Action'),
     size: 'lg',
@@ -1049,6 +1130,7 @@ async function openNextActionDialog() {
         label: __('Action Type'),
         options: '\nCall\nMeeting\nShowing\nSend Offer',
         reqd: 1,
+        default: defaultActionType || '',
       },
       {
         fieldname: 'starts_on',
