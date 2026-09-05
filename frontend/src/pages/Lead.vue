@@ -17,23 +17,16 @@
         :actions="document.actions"
       />
       <AssignTo v-model="assignees.data" doctype="CRM Lead" :docname="leadId" />
-      <Dropdown
-        v-if="doc && document.statuses"
-        :options="statuses"
-        placement="right"
+      <Tooltip
+        v-if="doc?.status"
+        :text="__('Status is updated automatically by workflow actions')"
       >
-        <template #default="{ open }">
-          <Button
-            v-if="doc.status"
-            :label="statusLabel(doc.status)"
-            :iconRight="open ? 'chevron-up' : 'chevron-down'"
-          >
-            <template #prefix>
-              <IndicatorIcon :class="getLeadStatus(doc.status).color" />
-            </template>
-          </Button>
-        </template>
-      </Dropdown>
+        <Button :label="statusLabel(doc.status)" iconRight="lock">
+          <template #prefix>
+            <IndicatorIcon :class="getLeadStatus(doc.status)?.color" />
+          </template>
+        </Button>
+      </Tooltip>
       <Button
         :label="__('Convert to Deal')"
         variant="solid"
@@ -52,7 +45,9 @@
           v-if="activeTabName === 'Properties'"
           class="flex flex-1 flex-col overflow-hidden"
         >
-          <div class="flex items-center justify-between border-b px-5 py-3">
+          <div
+            class="flex items-center justify-between gap-3 border-b px-5 py-3"
+          >
             <div>
               <div class="text-base font-medium text-ink-gray-9">
                 {{ linkedPropertiesTitle }}
@@ -61,22 +56,43 @@
                 {{ linkedPropertiesDescription }}
               </div>
             </div>
+            <div v-if="isSellerLead" class="flex shrink-0 gap-2">
+              <Button
+                :label="__('Add Property')"
+                variant="solid"
+                @click="addSellerProperty"
+              />
+              <Button
+                :label="__('Assign Existing')"
+                variant="subtle"
+                @click="assignPropertyUnitToSeller"
+              />
+            </div>
           </div>
           <div class="flex-1 overflow-auto p-5">
             <div v-if="isBuyerLead" class="mb-5 flex flex-col gap-4">
               <!-- Card 1: Gated Actions (top) -->
-              <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
+              <div
+                class="rounded border border-outline-gray-1 bg-surface-white p-4"
+              >
                 <div class="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <div class="text-sm font-medium text-ink-gray-9">
                       {{ __('Lead Actions') }}
                     </div>
                     <div class="text-xs text-ink-gray-6">
-                      {{ __('Available actions based on current lead status: ') }}
-                      <span class="font-semibold">{{ doc.status || __('Fresh Lead') }}</span>
+                      {{
+                        __('Available actions based on current lead status: ')
+                      }}
+                      <span class="font-semibold">{{
+                        doc.status || __('Fresh Lead')
+                      }}</span>
                     </div>
                   </div>
-                  <div v-if="doc.lead_age" class="rounded bg-surface-gray-2 px-3 py-1.5 text-xs font-medium text-ink-gray-7">
+                  <div
+                    v-if="doc.lead_age"
+                    class="rounded bg-surface-gray-2 px-3 py-1.5 text-xs font-medium text-ink-gray-7"
+                  >
                     {{ __('Age') }}: {{ doc.lead_age }}
                   </div>
                 </div>
@@ -95,6 +111,7 @@
                   />
                   <!-- After call: Log Call button -->
                   <Button
+                    v-if="callStarted || doc.last_call_outcome"
                     :label="__('Log Call Result')"
                     variant="solid"
                     theme="orange"
@@ -119,7 +136,9 @@
               </div>
 
               <!-- Card 2: Flags (No-Answer Tracking) -->
-              <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
+              <div
+                class="rounded border border-outline-gray-1 bg-surface-white p-4"
+              >
                 <div class="mb-3">
                   <div class="text-sm font-medium text-ink-gray-9">
                     {{ __('Call Tracking Flags') }}
@@ -139,8 +158,15 @@
                 </div>
               </div>
 
+              <LeadProgressGraph
+                :progress="leadProgress.data || {}"
+                :loading="leadProgress.loading"
+              />
+
               <!-- Card 3: Interest Details -->
-              <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
+              <div
+                class="rounded border border-outline-gray-1 bg-surface-white p-4"
+              >
                 <div class="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <div class="text-sm font-medium text-ink-gray-9">
@@ -171,26 +197,39 @@
               </div>
 
               <!-- Card 4: Add Inventory Units or Requests -->
-              <div class="rounded border border-outline-gray-1 bg-surface-white p-4">
-                <div class="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div
+                class="rounded border border-outline-gray-1 bg-surface-white p-4"
+              >
+                <div
+                  class="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"
+                >
                   <div>
                     <div class="text-sm font-medium text-ink-gray-9">
                       {{ __('Linked Units & Requests') }}
                     </div>
                     <div class="text-xs text-ink-gray-6">
-                      {{ __('Select available inventory units, or record a buyer request when the requirement is not currently in inventory.') }}
+                      {{
+                        __(
+                          'Select available inventory units, or record a buyer request when the requirement is not currently in inventory.',
+                        )
+                      }}
                     </div>
                   </div>
-                  <div class="flex gap-2">
+                  <div class="flex flex-wrap gap-2">
+                    <Button
+                      :label="__('Add Interest')"
+                      variant="solid"
+                      @click="openInterestDeterminationDialog"
+                    />
                     <Button
                       :label="__('Browse Units')"
-                      variant="solid"
+                      variant="subtle"
                       @click="openUnitSelectionPopup"
                     />
                     <Button
-                      :label="__('Add Request')"
+                      :label="__('Edit Existing')"
                       variant="subtle"
-                      @click="addInterestRequest"
+                      @click="openExistingInterestEditor"
                     />
                   </div>
                 </div>
@@ -213,16 +252,34 @@
               v-else
               class="overflow-hidden rounded border border-outline-gray-1"
             >
-              <table v-if="isBuyerLead" class="w-full text-left text-sm">
+              <LeadInterestGroups
+                v-if="isBuyerLead"
+                :rows="visibleLinkedPropertyRows"
+                :can-review="canReviewInterestDeletion"
+                @edit="editInterestRecord"
+                @request-delete="requestInterestDeletion"
+                @review="reviewInterestDeletion"
+              />
+              <table v-else class="w-full text-left text-sm">
                 <thead class="border-b bg-surface-gray-1 text-ink-gray-6">
                   <tr>
-                    <th class="px-4 py-3 font-medium">{{ __('Type / SKU') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Unit / Request Notes') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Area') }}</th>
+                    <th class="px-4 py-3 font-medium">
+                      {{ __('Property Code / SKU') }}
+                    </th>
+                    <th class="px-4 py-3 font-medium">
+                      {{ __('Property Title / Unit') }}
+                    </th>
+                    <th class="px-4 py-3 font-medium">
+                      {{ __('Compound / Project') }}
+                    </th>
                     <th class="px-4 py-3 font-medium">{{ __('Developer') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Compound') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Finishing Type') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Budget') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ __('Unit Type') }}</th>
+                    <th class="px-4 py-3 font-medium">
+                      {{ __('Finishing Type') }}
+                    </th>
+                    <th class="px-4 py-3 font-medium">
+                      {{ __('Target Asking Price') }}
+                    </th>
                     <th class="px-4 py-3 font-medium">{{ __('Status') }}</th>
                   </tr>
                 </thead>
@@ -233,58 +290,78 @@
                     class="border-b last:border-b-0"
                   >
                     <td class="px-4 py-3 text-ink-gray-9">
-                      <span
-                        v-if="isRequestInterest(row)"
-                        class="rounded bg-surface-gray-2 px-2 py-1 text-xs font-medium text-ink-gray-7"
-                      >
-                        {{ __('Request') }}
-                      </span>
-                      <span v-else>{{ row.sku || __('—') }}</span>
+                      {{ row.sku || row.property_code || __('—') }}
                     </td>
                     <td class="px-4 py-3 text-ink-gray-8">
-                      {{ isRequestInterest(row) ? row.request_notes || __('—') : row.name || __('—') }}
+                      {{ row.property_title || row.name || __('—') }}
                     </td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : formatUnitArea(row) }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : row.developer || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : row.project || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : row.finishing_type || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? __('—') : formatPrice(row.price) }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ isRequestInterest(row) ? row.request_status || __('Open') : row.proposal_status || __('Not Sent') }}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <table v-else class="w-full text-left text-sm">
-                <thead class="border-b bg-surface-gray-1 text-ink-gray-6">
-                  <tr>
-                    <th class="px-4 py-3 font-medium">{{ __('Property Code / SKU') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Property Title / Unit') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Compound / Project') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Developer') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Unit Type') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Finishing Type') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Target Asking Price') }}</th>
-                    <th class="px-4 py-3 font-medium">{{ __('Status') }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="row in visibleLinkedPropertyRows"
-                    :key="row.name"
-                    class="border-b last:border-b-0"
-                  >
-                    <td class="px-4 py-3 text-ink-gray-9">{{ row.sku || row.property_code || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.property_title || row.name || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.project || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.developer || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.unit_type || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.finishing_type || __('—') }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ formatPrice(row.price) }}</td>
-                    <td class="px-4 py-3 text-ink-gray-8">{{ row.status || __('—') }}</td>
+                    <td class="px-4 py-3 text-ink-gray-8">
+                      {{ row.project || __('—') }}
+                    </td>
+                    <td class="px-4 py-3 text-ink-gray-8">
+                      {{ row.developer || __('—') }}
+                    </td>
+                    <td class="px-4 py-3 text-ink-gray-8">
+                      {{ row.unit_type || __('—') }}
+                    </td>
+                    <td class="px-4 py-3 text-ink-gray-8">
+                      {{ row.finishing_type || __('—') }}
+                    </td>
+                    <td class="px-4 py-3 text-ink-gray-8">
+                      {{ formatPrice(row.price) }}
+                    </td>
+                    <td class="px-4 py-3 text-ink-gray-8">
+                      {{ row.status || __('—') }}
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
+        </div>
+        <LeadSmartEvents
+          v-else-if="activeTabName === 'Events'"
+          ref="smartEvents"
+          :lead-id="leadId"
+        />
+        <div
+          v-else-if="activeTabName === 'Comments'"
+          class="flex flex-1 flex-col overflow-hidden"
+        >
+          <div
+            class="mx-5 mt-4 rounded border border-outline-gray-1 bg-surface-gray-1 p-4"
+          >
+            <div
+              class="text-xs font-medium uppercase tracking-wide text-ink-gray-5"
+            >
+              {{ __('Latest Status-changing Action') }}
+            </div>
+            <div
+              v-if="lastStatusAction"
+              class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+            >
+              <span class="font-semibold text-ink-gray-9">{{
+                lastStatusAction.action
+              }}</span>
+              <span class="text-ink-gray-6">{{ lastStatusAction.status }}</span>
+              <span class="text-xs text-ink-gray-5">{{
+                formatDateTime(lastStatusAction.transitioned_on)
+              }}</span>
+            </div>
+            <div v-else class="mt-2 text-sm text-ink-gray-5">
+              {{ __('No status-changing action has been recorded yet.') }}
+            </div>
+          </div>
+          <Activities
+            ref="activities"
+            v-model:reload="reload"
+            v-model:tabIndex="tabIndex"
+            doctype="CRM Lead"
+            :docname="leadId"
+            :tabs="tabs"
+            @beforeSave="beforeStatusChange"
+            @afterSave="reloadResources"
+          />
         </div>
         <Activities
           v-else
@@ -456,7 +533,6 @@ import ErrorPage from '@/components/ErrorPage.vue'
 import Icon from '@/components/Icon.vue'
 import Resizer from '@/components/Resizer.vue'
 import ActivityIcon from '@/components/Icons/ActivityIcon.vue'
-import Email2Icon from '@/components/Icons/Email2Icon.vue'
 import CommentIcon from '@/components/Icons/CommentIcon.vue'
 import DetailsIcon from '@/components/Icons/DetailsIcon.vue'
 import EventIcon from '@/components/Icons/EventIcon.vue'
@@ -476,8 +552,10 @@ import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
 import UnitSelectionDialog from '@/components/Modals/UnitSelectionDialog.vue'
+import LeadProgressGraph from '@/components/LeadProgressGraph.vue'
+import LeadSmartEvents from '@/components/LeadSmartEvents.vue'
+import LeadInterestGroups from '@/components/LeadInterestGroups.vue'
 import {
-  openWebsite,
   setupCustomizations,
   copyToClipboard,
   validateIsImageFile,
@@ -503,13 +581,13 @@ import {
   usePageMeta,
   toast,
 } from 'frappe-ui'
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useActiveTabManager } from '@/composables/useActiveTabManager'
 
 const { brand } = getSettings()
 const { $dialog, $socket, makeCall } = globalStore()
-const { statusOptions, getLeadStatus } = statusesStore()
+const { getLeadStatus } = statusesStore()
 const { doctypeMeta } = getMeta('CRM Lead')
 
 const route = useRoute()
@@ -521,22 +599,17 @@ const props = defineProps({
 
 const reload = ref(false)
 const activities = ref(null)
+const smartEvents = ref(null)
 const errorTitle = ref('')
 const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
 const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
 const showUnitSelectionDialog = ref(false)
+const callStarted = ref(false)
 
-const {
-  triggerOnChange,
-  triggerOnRender,
-  assignees,
-  permissions,
-  document,
-  scripts,
-  error,
-} = useDocument('CRM Lead', props.leadId)
+const { triggerOnRender, assignees, permissions, document, scripts, error } =
+  useDocument('CRM Lead', props.leadId)
 
 const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 
@@ -545,7 +618,10 @@ const isBuyerLead = computed(() => doc.value.party_type !== 'Seller')
 const isSellerLead = computed(() => doc.value.party_type === 'Seller')
 const isInterestedOrBeyond = computed(() => {
   const s = doc.value.status
-  return s && !['New', 'Fresh Lead'].includes(s)
+  return (
+    doc.value.interest_status === 'Interested' ||
+    (s && !['New', 'Fresh Lead'].includes(s))
+  )
 })
 
 onMounted(async () => {
@@ -618,13 +694,6 @@ const title = computed(() => {
   return doc.value?.[t] || props.leadId
 })
 
-const statuses = computed(() => {
-  let customStatuses = document.statuses?.length
-    ? document.statuses
-    : document._statuses || []
-  return statusOptions('lead', customStatuses, triggerStatusChange)
-})
-
 usePageMeta(() => {
   return { title: title.value, icon: brand.favicon }
 })
@@ -675,11 +744,36 @@ const linkedProperties = createResource({
 
 const linkedPropertyRows = computed(() => linkedProperties.data || [])
 
+const leadProgress = createResource({
+  url: 'real_estate_crm_customs.api.get_lead_progress',
+  cache: ['leadProgress', props.leadId],
+  params: { lead: props.leadId },
+  auto: true,
+})
+
+const interestWorkflow = createResource({
+  url: 'real_estate_crm_customs.api.get_interest_workflow_context',
+  cache: ['interestWorkflow', props.leadId],
+  params: { lead: props.leadId },
+  auto: true,
+})
+
+const lastStatusAction = computed(
+  () => leadProgress.data?.last_status_action || null,
+)
+const canReviewInterestDeletion = computed(
+  () => interestWorkflow.data?.can_review_deletions || false,
+)
+
 const visibleLinkedPropertyRows = computed(() => {
   if (isSellerLead.value) {
-    return linkedPropertyRows.value.filter((row) => row.owner_lead === props.leadId)
+    return linkedPropertyRows.value.filter(
+      (row) => row.owner_lead === props.leadId,
+    )
   }
-  return linkedPropertyRows.value.filter((row) => row.relationship !== 'Seller Unit')
+  return linkedPropertyRows.value.filter(
+    (row) => row.relationship !== 'Seller Unit',
+  )
 })
 
 const linkedPropertiesTitle = computed(() =>
@@ -689,7 +783,9 @@ const linkedPropertiesTitle = computed(() =>
 const linkedPropertiesDescription = computed(() =>
   isBuyerLead.value
     ? __('Buyer interest details plus one or many selected inventory units.')
-    : __('Seller property onboarding list: property identity, compound, developer, type, finishing, asking price, and status.'),
+    : __(
+        'Seller property onboarding list: property identity, compound, developer, type, finishing, asking price, and status.',
+      ),
 )
 
 const linkedPropertiesEmptyText = computed(() =>
@@ -716,14 +812,29 @@ const buyerInterestPreferenceRows = computed(() => [
   { label: __('Finishing Type'), value: doc.value.preferred_finishing_type },
   { label: __('Delivery Time'), value: doc.value.preferred_delivery_time },
   { label: __('Budget'), value: formatPrice(doc.value.buyer_budget) },
-  { label: __('Primary Buyer'), value: doc.value.is_primary_buyer ? __('Yes') : __('No') },
+  {
+    label: __('Primary Buyer'),
+    value: doc.value.is_primary_buyer ? __('Yes') : __('No'),
+  },
 ])
 
 const callFlagsRows = computed(() => [
-  { label: __('Interest Status'), value: doc.value.interest_status || __('\u2014') },
-  { label: __('Current No-Answer Streak'), value: doc.value.no_answer_consecutive_count || 0 },
-  { label: __('Total No-Answer History'), value: doc.value.no_answer_total_count || 0 },
-  { label: __('Last Call Outcome'), value: doc.value.last_call_outcome || __('\u2014') },
+  {
+    label: __('Interest Status'),
+    value: doc.value.interest_status || __('\u2014'),
+  },
+  {
+    label: __('Current No-Answer Streak'),
+    value: doc.value.no_answer_consecutive_count || 0,
+  },
+  {
+    label: __('Total No-Answer History'),
+    value: doc.value.no_answer_total_count || 0,
+  },
+  {
+    label: __('Last Call Outcome'),
+    value: doc.value.last_call_outcome || __('\u2014'),
+  },
 ])
 
 // ---------------------------------------------------------------------------
@@ -736,16 +847,9 @@ function formatPrice(value) {
 
 function formatPreferredArea() {
   if (!doc.value.preferred_area && !doc.value.buyer_budget) return ''
-  return [doc.value.preferred_area, doc.value.area_unit].filter(Boolean).join(' ')
-}
-
-function formatUnitArea(row) {
-  const unitArea = row.unit_area || row.area || row.size
-  return unitArea ? [unitArea, doc.value.area_unit].filter(Boolean).join(' ') : __('—')
-}
-
-function isRequestInterest(row) {
-  return row?.interest_record_type === 'Request'
+  return [doc.value.preferred_area, doc.value.area_unit]
+    .filter(Boolean)
+    .join(' ')
 }
 
 // ---------------------------------------------------------------------------
@@ -781,7 +885,9 @@ async function openWhatsAppWithSubject() {
         fieldtype: 'Small Text',
         label: __('Message Subject / Content'),
         reqd: 1,
-        default: __('Hello, this is a follow-up regarding your real estate inquiry.'),
+        default: __(
+          'Hello, this is a follow-up regarding your real estate inquiry.',
+        ),
       },
     ],
     submitLabel: __('Open WhatsApp'),
@@ -790,17 +896,24 @@ async function openWhatsAppWithSubject() {
   if (!values?.subject) return
 
   try {
-    const result = await call('real_estate_crm_customs.api.record_whatsapp_subject', {
-      lead: props.leadId,
-      subject: values.subject,
-    })
+    const result = await call(
+      'real_estate_crm_customs.api.record_whatsapp_subject',
+      {
+        lead: props.leadId,
+        subject: values.subject,
+      },
+    )
     activities.value?.all_activities?.reload?.()
     if (result?.whatsapp_url) {
       window.open(result.whatsapp_url, '_blank')
     }
     toast.success(__('WhatsApp message recorded and chat opened'))
   } catch (err) {
-    toast.error(err.messages?.[0] || err.message || __('Error recording WhatsApp message'))
+    toast.error(
+      err.messages?.[0] ||
+        err.message ||
+        __('Error recording WhatsApp message'),
+    )
   }
 }
 
@@ -808,7 +921,9 @@ async function openWhatsAppWithSubject() {
 function openWhatsAppDirect() {
   const number = doc.value.whatsapp_number || doc.value.mobile_no
   if (!number) {
-    toast.error(__('Please set a WhatsApp number or mobile number for this lead'))
+    toast.error(
+      __('Please set a WhatsApp number or mobile number for this lead'),
+    )
     return
   }
   // Phone fieldtype stores as +CC-XXXXXXXXXX (e.g. +20-1070009839)
@@ -829,6 +944,7 @@ function triggerLeadCall() {
   // Phone fieldtype stores as +CC-XXXXXXXXXX (e.g. +20-1070009839)
   // For tel: URI, replace hyphen with nothing to get +CCXXXXXXXXXX
   const fullPhone = number.replace(/-/g, '')
+  callStarted.value = true
   if (callEnabled.value) {
     makeCall(fullPhone)
     return
@@ -840,26 +956,23 @@ function triggerLeadCall() {
 // 3. Call Log Dialog — Sequential: Outcome → Interest → Next Action
 // ---------------------------------------------------------------------------
 async function openCallLogDialog() {
-  // Step 1: Ask for call outcome
-  let outcomeValues = await renderFieldLayoutDialog({
+  const contactResult = await renderFieldLayoutDialog({
     title: __('Log Call Result'),
     fields: [
       {
         fieldname: 'outcome',
         fieldtype: 'Select',
-        label: __('Call Outcome'),
+        label: __('Contact Result'),
         options: '\nAnswered\nNo Answer',
         reqd: 1,
       },
     ],
     submitLabel: __('Continue'),
   })
+  if (!contactResult?.outcome) return
 
-  if (!outcomeValues?.outcome) return
-
-  if (outcomeValues.outcome === 'No Answer') {
-    // No Answer path: update flags + schedule next call
-    let scheduleValues = await renderFieldLayoutDialog({
+  if (contactResult.outcome === 'No Answer') {
+    const scheduleValues = await renderFieldLayoutDialog({
       title: __('Schedule Next Call Attempt'),
       fields: [
         {
@@ -871,63 +984,107 @@ async function openCallLogDialog() {
       ],
       submitLabel: __('Save & Schedule'),
     })
+    if (!scheduleValues?.schedule_next_call) return
 
     try {
-      const result = await call('real_estate_crm_customs.api.record_call_outcome', {
-        lead: props.leadId,
-        outcome: 'No Answer',
-        schedule_next_call: scheduleValues?.schedule_next_call || null,
-      })
+      const result = await call(
+        'real_estate_crm_customs.api.record_call_outcome',
+        {
+          lead: props.leadId,
+          outcome: 'No Answer',
+          schedule_next_call: scheduleValues.schedule_next_call,
+        },
+      )
       updateLeadActionState(result)
-      sections.reload()
-      document.reload?.()
-      activities.value?.all_activities?.reload?.()
+      reloadActionWeb()
       toast.success(__('No-answer recorded. Next call scheduled.'))
     } catch (err) {
-      toast.error(err.messages?.[0] || err.message || __('Error recording call outcome'))
+      toast.error(
+        err.messages?.[0] || err.message || __('Error recording call outcome'),
+      )
     }
     return
   }
 
-  // Answered path: record outcome first
   try {
-    const result = await call('real_estate_crm_customs.api.record_call_outcome', {
-      lead: props.leadId,
-      outcome: 'Answered',
-    })
+    const result = await call(
+      'real_estate_crm_customs.api.record_call_outcome',
+      {
+        lead: props.leadId,
+        outcome: 'Answered',
+      },
+    )
     updateLeadActionState(result)
-    sections.reload()
-    document.reload?.()
-    activities.value?.all_activities?.reload?.()
   } catch (err) {
-    toast.error(err.messages?.[0] || err.message || __('Error recording call outcome'))
+    toast.error(
+      err.messages?.[0] || err.message || __('Error recording call outcome'),
+    )
     return
   }
 
-  // Step 2: Action Selection — agent MUST choose next action after answered call
-  let actionValues = await renderFieldLayoutDialog({
-    title: __('Call Answered — Select Next Action'),
+  const qualification = await renderFieldLayoutDialog({
+    title: __('Mandatory Call Outcome'),
+    fields: [
+      {
+        fieldname: 'interest_outcome',
+        fieldtype: 'Select',
+        label: __('Qualification Outcome'),
+        options: '\nInterested\nNot Interested',
+        reqd: 1,
+      },
+    ],
+    submitLabel: __('Save Outcome'),
+  })
+  if (!qualification?.interest_outcome) return
+
+  const isInterested = qualification.interest_outcome === 'Interested'
+  try {
+    const result = await call(
+      'real_estate_crm_customs.api.record_interest_determination',
+      {
+        lead: props.leadId,
+        interested: isInterested ? 1 : 0,
+        qualification_only: isInterested ? 1 : 0,
+      },
+    )
+    updateLeadActionState(result)
+    reloadActionWeb()
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] ||
+        err.message ||
+        __('Error recording call qualification'),
+    )
+    return
+  }
+
+  if (!isInterested) {
+    toast.success(__('Call logged as Not Interested.'))
+    return
+  }
+
+  const actionValues = await renderFieldLayoutDialog({
+    title: __('Interested — Next Action Required'),
     fields: [
       {
         fieldname: 'next_action',
         fieldtype: 'Select',
-        label: __('What would you like to do next?'),
-        options: '\nAdd Interest\nSchedule Meeting\nSchedule Showing\nSchedule Next Call',
+        label: __('Next Action'),
+        options: '\nAdd Interest\nMeeting\nShowing\nNext Call',
         reqd: 1,
       },
     ],
     submitLabel: __('Continue'),
   })
-
   if (!actionValues?.next_action) return
 
   if (actionValues.next_action === 'Add Interest') {
     await openInterestDeterminationDialog()
-  } else if (actionValues.next_action === 'Schedule Meeting') {
+  } else if (actionValues.next_action === 'Meeting') {
     await openNextActionDialog('Meeting')
-  } else if (actionValues.next_action === 'Schedule Showing') {
+  } else if (actionValues.next_action === 'Showing') {
     await openNextActionDialog('Showing')
-  } else if (actionValues.next_action === 'Schedule Next Call') {
+  } else if (actionValues.next_action === 'Next Call') {
     await openNextActionDialog('Call')
   }
 }
@@ -936,184 +1093,132 @@ async function openCallLogDialog() {
 // 4. Interest Determination Dialog
 // ---------------------------------------------------------------------------
 async function openInterestDeterminationDialog() {
-  // P6: On 2nd+ call, ask Edit or Add if interests already exist
-  const existingInterests = doc.value.interested_in_units || []
-  if (existingInterests.length > 0) {
-    let choiceValues = await renderFieldLayoutDialog({
+  const existingInterests = visibleLinkedPropertyRows.value.filter(
+    (row) => row.interest_row_name,
+  )
+  if (existingInterests.length) {
+    const choice = await renderFieldLayoutDialog({
       title: __('Interest Already Recorded'),
       fields: [
         {
           fieldname: 'action',
           fieldtype: 'Select',
-          label: __('This lead already has {0} interest record(s). What would you like to do?', [existingInterests.length]),
+          label: __('Choose how to continue'),
           options: '\nAdd New Interest\nEdit Existing Interest',
           reqd: 1,
         },
       ],
       submitLabel: __('Continue'),
     })
-    if (!choiceValues?.action) return
-    if (choiceValues.action === 'Edit Existing Interest') {
-      // Open the standalone edit preferences dialog
-      await editBuyerInterestPreferences()
+    if (!choice?.action) return
+    if (choice.action === 'Edit Existing Interest') {
+      await openExistingInterestEditor()
       return
     }
-    // Otherwise fall through to add new interest
   }
 
-  let interestValues = await renderFieldLayoutDialog({
-    title: __('Interest Determination'),
+  const interestValues = await renderFieldLayoutDialog({
+    title: __('Add Interest'),
     size: 'xl',
     fields: [
-      {
-        fieldname: 'interested',
-        fieldtype: 'Select',
-        label: __('Is the client interested?'),
-        options: '\nYes\nNo',
-        reqd: 1,
-      },
-      {
-        fieldname: 'is_primary_buyer',
-        fieldtype: 'Check',
-        label: __('Is Primary Buyer?'),
-        depends_on: "eval:doc.interested=='Yes'",
-      },
-      {
-        fieldname: 'preferred_unit_area',
-        fieldtype: 'Float',
-        label: __('Unit Area (sqm/sqft)'),
-        depends_on: "eval:doc.interested=='Yes'",
-      },
-      {
-        fieldname: 'area_unit',
-        fieldtype: 'Select',
-        label: __('Area Unit'),
-        options: 'Sq M\nSq Ft',
-        default: 'Sq M',
-        depends_on: "eval:doc.interested=='Yes'",
-      },
-      {
-        fieldname: 'preferred_area',
-        fieldtype: 'Data',
-        label: __('Preferred Location/Area'),
-        depends_on: "eval:doc.interested=='Yes'",
-      },
-      {
-        fieldname: 'preferred_developer',
-        fieldtype: 'Link',
-        label: __('Developer'),
-        options: 'Property Developer',
-        depends_on: "eval:doc.interested=='Yes'",
-      },
-      {
-        fieldname: 'preferred_compound',
-        fieldtype: 'Link',
-        label: __('Compound / Project'),
-        options: 'Real Estate Project',
-        depends_on: "eval:doc.interested=='Yes'",
-      },
-      {
-        fieldname: 'preferred_finishing_type',
-        fieldtype: 'Select',
-        label: __('Finishing Type'),
-        options: '\nCore & Shell\nSemi-Finished\nFully Finished',
-        depends_on: "eval:doc.interested=='Yes'",
-      },
-      {
-        fieldname: 'preferred_delivery_time',
-        fieldtype: 'Data',
-        label: __('Delivery Time'),
-        depends_on: "eval:doc.interested=='Yes'",
-      },
-      {
-        fieldname: 'buyer_budget',
-        fieldtype: 'Currency',
-        label: __('Budget'),
-        depends_on: "eval:doc.interested=='Yes'",
-      },
       {
         fieldname: 'interest_category',
         fieldtype: 'Select',
         label: __('Interest Category'),
         options: '\nResale\nPrimary\nBrokerage Request\nInternational',
-        depends_on: "eval:doc.interested=='Yes'",
-        description: __('Resale = resale unit, Primary = open inventory, Brokerage = external request, International = abroad'),
+        reqd: 1,
+      },
+      {
+        fieldname: 'unit',
+        fieldtype: 'Link',
+        label: __('Available Unit'),
+        options: 'Real Estate Unit',
+        depends_on: "eval:['Resale','Primary'].includes(doc.interest_category)",
+        mandatory_depends_on:
+          "eval:['Resale','Primary'].includes(doc.interest_category)",
+        get_query: () => ({ filters: { status: 'Available' } }),
       },
       {
         fieldname: 'request_notes',
         fieldtype: 'Small Text',
-        label: __('Customer Request Notes (for Brokerage Request)'),
-        depends_on: "eval:doc.interested=='Yes' && doc.interest_category=='Brokerage Request'",
+        label: __('Brokerage Requirements'),
+        depends_on: "eval:doc.interest_category=='Brokerage Request'",
+        mandatory_depends_on: "eval:doc.interest_category=='Brokerage Request'",
       },
       {
         fieldname: 'international_type',
         fieldtype: 'Select',
-        label: __('International Type'),
-        options: '\nReal Estate\nStocks\nCharity Work\nOther',
-        depends_on: "eval:doc.interested=='Yes' && doc.interest_category=='International'",
+        label: __('International Category'),
+        options: '\nStocks\nCharity Work\nReal Estate',
+        depends_on: "eval:doc.interest_category=='International'",
+        mandatory_depends_on: "eval:doc.interest_category=='International'",
       },
       {
         fieldname: 'international_country',
         fieldtype: 'Link',
         label: __('Country'),
         options: 'Country',
-        depends_on: "eval:doc.interested=='Yes' && doc.interest_category=='International'",
+        depends_on: "eval:doc.interest_category=='International'",
+        mandatory_depends_on: "eval:doc.interest_category=='International'",
       },
       {
         fieldname: 'international_details',
         fieldtype: 'Small Text',
-        label: __('International Details'),
-        depends_on: "eval:doc.interested=='Yes' && doc.interest_category=='International'",
+        label: __('International Request Details'),
+        depends_on: "eval:doc.interest_category=='International'",
+      },
+      {
+        fieldname: 'preferred_area',
+        fieldtype: 'Data',
+        label: __('Preferred Location / Area'),
+      },
+      {
+        fieldname: 'preferred_unit_type',
+        fieldtype: 'Select',
+        label: __('Unit Type'),
+        options:
+          '\nApartment\nDuplex\nTownhouse\nVilla\nChalet\nStudio\nPenthouse',
+      },
+      {
+        fieldname: 'buyer_budget',
+        fieldtype: 'Currency',
+        label: __('Budget'),
       },
     ],
     submitLabel: __('Save Interest'),
   })
-
-  if (!interestValues?.interested) return
-
-  const isInterested = interestValues.interested === 'Yes' ? 1 : 0
+  if (!interestValues?.interest_category) return
 
   try {
-    const interestData = isInterested ? {
-      area_unit: interestValues.area_unit,
-      preferred_area: interestValues.preferred_area,
-      preferred_developer: interestValues.preferred_developer,
-      preferred_compound: interestValues.preferred_compound,
-      preferred_finishing_type: interestValues.preferred_finishing_type,
-      preferred_delivery_time: interestValues.preferred_delivery_time,
-      buyer_budget: interestValues.buyer_budget,
-      interest_category: interestValues.interest_category || 'Resale',
+    const interestData = {
+      interest_category: interestValues.interest_category,
+      units: interestValues.unit ? [interestValues.unit] : [],
       request_notes: interestValues.request_notes || null,
       international_type: interestValues.international_type || null,
       international_country: interestValues.international_country || null,
       international_details: interestValues.international_details || null,
-    } : null
-
-    const result = await call('real_estate_crm_customs.api.record_interest_determination', {
-      lead: props.leadId,
-      interested: isInterested,
-      is_primary_buyer: interestValues.is_primary_buyer ? 1 : 0,
-      interest_data: interestData ? JSON.stringify(interestData) : null,
-    })
-    updateLeadActionState(result)
-    sections.reload()
-    document.reload?.()
-    linkedProperties.reload()
-    activities.value?.all_activities?.reload?.()
-
-    if (!isInterested) {
-      toast.success(__('Lead marked as Not Interested.'))
-      return
+      preferred_area: interestValues.preferred_area || null,
+      preferred_unit_type: interestValues.preferred_unit_type || null,
+      buyer_budget: interestValues.buyer_budget || null,
     }
-
-    toast.success(__('Lead marked as Interested. Now schedule the next action.'))
+    const result = await call(
+      'real_estate_crm_customs.api.record_interest_determination',
+      {
+        lead: props.leadId,
+        interested: 1,
+        is_primary_buyer:
+          interestValues.interest_category === 'Primary' ? 1 : 0,
+        interest_data: JSON.stringify(interestData),
+      },
+    )
+    updateLeadActionState(result)
+    reloadActionWeb()
+    toast.success(__('Interest added successfully.'))
   } catch (err) {
-    toast.error(err.messages?.[0] || err.message || __('Error recording interest'))
-    return
+    toast.error(
+      err.messages?.[0] || err.message || __('Error recording interest'),
+    )
   }
-
-  // Step 3: Next Action Dialog (mandatory after interest)
-  await openNextActionDialog()
 }
 
 // ---------------------------------------------------------------------------
@@ -1163,23 +1268,28 @@ async function openNextActionDialog(defaultActionType = null) {
   if (!values?.action_type || !values?.starts_on) return
 
   try {
-    const result = await call('real_estate_crm_customs.api.schedule_next_action', {
-      lead: props.leadId,
-      action_type: values.action_type,
-      starts_on: values.starts_on,
-      subject: values.subject || null,
-      notes: values.notes || null,
-      target_unit: values.target_unit || null,
-    })
-    activities.value?.all_activities?.reload?.()
-    document.reload?.()
+    const result = await call(
+      'real_estate_crm_customs.api.schedule_next_action',
+      {
+        lead: props.leadId,
+        action_type: values.action_type,
+        starts_on: values.starts_on,
+        subject: values.subject || null,
+        notes: values.notes || null,
+        target_unit: values.target_unit || null,
+      },
+    )
+    updateLeadActionState(result)
+    reloadActionWeb()
     let msg = __('Next action scheduled: {0}', [values.action_type])
     if (result?.unit_showing_recorded) {
       msg += ' ' + __('(Showing recorded on unit and seller lead)')
     }
     toast.success(msg)
   } catch (err) {
-    toast.error(err.messages?.[0] || err.message || __('Error scheduling next action'))
+    toast.error(
+      err.messages?.[0] || err.message || __('Error scheduling next action'),
+    )
   }
 }
 
@@ -1188,12 +1298,15 @@ async function openNextActionDialog(defaultActionType = null) {
 // ---------------------------------------------------------------------------
 async function openMeetingResultDialog() {
   // First fetch upcoming events for this lead
-  let events = []
+  let events
   try {
-    events = await call('real_estate_crm_customs.api.get_lead_upcoming_events', {
-      lead: props.leadId,
-    })
-  } catch (err) {
+    events = await call(
+      'real_estate_crm_customs.api.get_lead_upcoming_events',
+      {
+        lead: props.leadId,
+      },
+    )
+  } catch {
     toast.error(__('Could not load events'))
     return
   }
@@ -1204,7 +1317,9 @@ async function openMeetingResultDialog() {
   }
 
   // Build event options
-  const eventOptions = events.map(e => `${e.name} — ${e.subject} (${e.starts_on})`).join('\n')
+  const eventOptions = events
+    .map((e) => `${e.name} — ${e.subject} (${e.starts_on})`)
+    .join('\n')
 
   let values = await renderFieldLayoutDialog({
     title: __('Log Meeting / Showing Result'),
@@ -1253,7 +1368,7 @@ async function openMeetingResultDialog() {
   const eventName = values.event_selection.split(' — ')[0]
 
   try {
-    const result = await call('real_estate_crm_customs.api.log_meeting_result', {
+    await call('real_estate_crm_customs.api.log_meeting_result', {
       lead: props.leadId,
       event_name: eventName,
       result: values.result,
@@ -1261,8 +1376,7 @@ async function openMeetingResultDialog() {
       reschedule_to: values.reschedule_to || null,
       target_unit: values.target_unit || null,
     })
-    activities.value?.all_activities?.reload?.()
-    document.reload?.()
+    reloadActionWeb()
     toast.success(__('Meeting result logged: {0}', [values.result]))
 
     // After Done or Cancelled → prompt next action
@@ -1270,8 +1384,241 @@ async function openMeetingResultDialog() {
       await openNextActionDialog()
     }
   } catch (err) {
-    toast.error(err.messages?.[0] || err.message || __('Error logging meeting result'))
+    toast.error(
+      err.messages?.[0] || err.message || __('Error logging meeting result'),
+    )
   }
+}
+
+// ---------------------------------------------------------------------------
+// Interest row editing and deletion approval
+// ---------------------------------------------------------------------------
+async function openExistingInterestEditor() {
+  const rows = visibleLinkedPropertyRows.value.filter(
+    (row) => row.interest_row_name,
+  )
+  if (!rows.length) {
+    toast.info(__('No existing interest record is available to edit.'))
+    return
+  }
+  const labels = rows.map((row) => interestOptionLabel(row))
+  const values = await renderFieldLayoutDialog({
+    title: __('Select Interest to Edit'),
+    fields: [
+      {
+        fieldname: 'selection',
+        fieldtype: 'Select',
+        label: __('Interest Record'),
+        options: `\n${labels.join('\n')}`,
+        reqd: 1,
+      },
+    ],
+    submitLabel: __('Edit'),
+  })
+  if (!values?.selection) return
+  const index = labels.indexOf(values.selection)
+  if (index >= 0) await editInterestRecord(rows[index])
+}
+
+async function editInterestRecord(row) {
+  const values = await renderFieldLayoutDialog({
+    title: __('Edit Interest Record'),
+    size: 'lg',
+    defaults: {
+      interest_category: row.interest_category,
+      unit: row.interest_record_type === 'Inventory Unit' ? row.name : null,
+      request_notes: row.request_notes,
+      request_status: row.request_status || 'Open',
+      international_type: row.international_type,
+      international_country: row.international_country,
+      international_details: row.international_details,
+      unit_interest_status: row.unit_interest_status || 'Active',
+    },
+    fields: [
+      {
+        fieldname: 'interest_category',
+        fieldtype: 'Select',
+        label: __('Interest Category'),
+        options: '\nResale\nPrimary\nBrokerage Request\nInternational',
+        reqd: 1,
+      },
+      {
+        fieldname: 'unit',
+        fieldtype: 'Link',
+        label: __('Available Unit'),
+        options: 'Real Estate Unit',
+        depends_on: "eval:['Resale','Primary'].includes(doc.interest_category)",
+        mandatory_depends_on:
+          "eval:['Resale','Primary'].includes(doc.interest_category)",
+        get_query: () => ({ filters: { status: 'Available' } }),
+      },
+      {
+        fieldname: 'request_notes',
+        fieldtype: 'Small Text',
+        label: __('Brokerage Requirements'),
+        depends_on: "eval:doc.interest_category=='Brokerage Request'",
+        mandatory_depends_on: "eval:doc.interest_category=='Brokerage Request'",
+      },
+      {
+        fieldname: 'request_status',
+        fieldtype: 'Select',
+        label: __('Request Status'),
+        options: '\nOpen\nFulfilled\nCancelled',
+        depends_on: "eval:doc.interest_category=='Brokerage Request'",
+      },
+      {
+        fieldname: 'international_type',
+        fieldtype: 'Select',
+        label: __('International Category'),
+        options: '\nStocks\nCharity Work\nReal Estate',
+        depends_on: "eval:doc.interest_category=='International'",
+        mandatory_depends_on: "eval:doc.interest_category=='International'",
+      },
+      {
+        fieldname: 'international_country',
+        fieldtype: 'Link',
+        label: __('Country'),
+        options: 'Country',
+        depends_on: "eval:doc.interest_category=='International'",
+        mandatory_depends_on: "eval:doc.interest_category=='International'",
+      },
+      {
+        fieldname: 'international_details',
+        fieldtype: 'Small Text',
+        label: __('International Details'),
+        depends_on: "eval:doc.interest_category=='International'",
+      },
+      {
+        fieldname: 'unit_interest_status',
+        fieldtype: 'Select',
+        label: __('Interest Status'),
+        options: '\nActive\nLost Interest',
+        reqd: 1,
+      },
+    ],
+    submitLabel: __('Save Changes'),
+  })
+  if (!values) return
+
+  try {
+    await call('real_estate_crm_customs.api.update_interest_record', {
+      lead: props.leadId,
+      row_name: row.interest_row_name,
+      interest_data: JSON.stringify(values),
+    })
+    reloadActionWeb()
+    toast.success(__('Interest record updated.'))
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] || err.message || __('Error updating interest record'),
+    )
+  }
+}
+
+async function requestInterestDeletion(row) {
+  const values = await renderFieldLayoutDialog({
+    title: __('Request Interest Deletion'),
+    fields: [
+      {
+        fieldname: 'reason',
+        fieldtype: 'Small Text',
+        label: __('Reason for deletion'),
+        reqd: 1,
+      },
+    ],
+    submitLabel: __('Send to Manager'),
+  })
+  if (!values?.reason) return
+
+  try {
+    const result = await call(
+      'real_estate_crm_customs.api.request_interest_deletion',
+      {
+        lead: props.leadId,
+        row_name: row.interest_row_name,
+        reason: values.reason,
+      },
+    )
+    reloadActionWeb()
+    toast.success(
+      __('Deletion request sent to {0}.', [
+        result.allocated_to || __('Sales Manager'),
+      ]),
+    )
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] || err.message || __('Error requesting deletion'),
+    )
+  }
+}
+
+async function reviewInterestDeletion(row, decision) {
+  const values = await renderFieldLayoutDialog({
+    title:
+      decision === 'Approve'
+        ? __('Approve Interest Deletion')
+        : __('Reject Interest Deletion'),
+    fields: [
+      {
+        fieldname: 'note',
+        fieldtype: 'Small Text',
+        label: __('Manager Note'),
+      },
+    ],
+    submitLabel: __(decision),
+  })
+  if (!values) return
+
+  try {
+    await call('real_estate_crm_customs.api.review_interest_deletion', {
+      lead: props.leadId,
+      row_name: row.interest_row_name,
+      request_name: row.deletion_request || null,
+      decision,
+      note: values.note || null,
+    })
+    reloadActionWeb()
+    toast.success(
+      decision === 'Approve'
+        ? __('Interest deleted after manager approval.')
+        : __('Deletion request rejected.'),
+    )
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] ||
+        err.message ||
+        __('Error reviewing deletion request'),
+    )
+  }
+}
+
+function interestOptionLabel(row) {
+  const title =
+    row.sku ||
+    row.request_notes ||
+    [row.international_type, row.international_country]
+      .filter(Boolean)
+      .join(' — ') ||
+    row.name
+  return `${row.interest_category || 'Interest'} — ${title} [${row.interest_row_name}]`
+}
+
+function reloadActionWeb() {
+  sections.reload()
+  document.reload?.()
+  linkedProperties.reload()
+  interestWorkflow.reload()
+  leadProgress.reload()
+  smartEvents.value?.reload?.()
+  activities.value?.all_activities?.reload?.()
+}
+
+function formatDateTime(value) {
+  if (!value) return __('—')
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
 }
 
 // ---------------------------------------------------------------------------
@@ -1297,13 +1644,47 @@ async function editBuyerInterestPreferences() {
       buyer_budget: doc.value.buyer_budget,
     },
     fields: [
-      { fieldname: 'preferred_area', fieldtype: 'Data', label: __('Preferred Location / Area') },
-      { fieldname: 'area_unit', fieldtype: 'Select', label: __('Area Unit'), options: 'Sq M\nSq Ft' },
-      { fieldname: 'preferred_unit_type', fieldtype: 'Select', label: __('Unit Type'), options: '\nApartment\nDuplex\nTownhouse\nVilla\nChalet\nStudio\nPenthouse' },
-      { fieldname: 'preferred_developer', fieldtype: 'Link', label: __('Developer'), options: 'Property Developer' },
-      { fieldname: 'preferred_compound', fieldtype: 'Link', label: __('Compound / Project'), options: 'Real Estate Project' },
-      { fieldname: 'preferred_finishing_type', fieldtype: 'Select', label: __('Finishing Type'), options: '\nCore & Shell\nSemi-Finished\nFully Finished' },
-      { fieldname: 'preferred_delivery_time', fieldtype: 'Data', label: __('Delivery Time') },
+      {
+        fieldname: 'preferred_area',
+        fieldtype: 'Data',
+        label: __('Preferred Location / Area'),
+      },
+      {
+        fieldname: 'area_unit',
+        fieldtype: 'Select',
+        label: __('Area Unit'),
+        options: 'Sq M\nSq Ft',
+      },
+      {
+        fieldname: 'preferred_unit_type',
+        fieldtype: 'Select',
+        label: __('Unit Type'),
+        options:
+          '\nApartment\nDuplex\nTownhouse\nVilla\nChalet\nStudio\nPenthouse',
+      },
+      {
+        fieldname: 'preferred_developer',
+        fieldtype: 'Link',
+        label: __('Developer'),
+        options: 'Property Developer',
+      },
+      {
+        fieldname: 'preferred_compound',
+        fieldtype: 'Link',
+        label: __('Compound / Project'),
+        options: 'Real Estate Project',
+      },
+      {
+        fieldname: 'preferred_finishing_type',
+        fieldtype: 'Select',
+        label: __('Finishing Type'),
+        options: '\nCore & Shell\nSemi-Finished\nFully Finished',
+      },
+      {
+        fieldname: 'preferred_delivery_time',
+        fieldtype: 'Data',
+        label: __('Delivery Time'),
+      },
       { fieldname: 'buyer_budget', fieldtype: 'Currency', label: __('Budget') },
     ],
     submitLabel: __('Save Interest Details'),
@@ -1328,40 +1709,6 @@ async function editBuyerInterestPreferences() {
 }
 
 // ---------------------------------------------------------------------------
-// Add Interest Request (standalone)
-// ---------------------------------------------------------------------------
-async function addInterestRequest() {
-  if (!isBuyerLead.value) {
-    toast.error(__('Only buyer leads can have request-only interest records'))
-    return
-  }
-
-  let values = await renderFieldLayoutDialog({
-    title: __('Add Request Not in Inventory'),
-    fields: [
-      { fieldname: 'request_notes', fieldtype: 'Small Text', label: __('Request Notes'), reqd: 1 },
-      { fieldname: 'request_status', fieldtype: 'Select', label: __('Request Status'), options: '\nOpen\nFulfilled\nCancelled', default: 'Open' },
-    ],
-    submitLabel: __('Add Request'),
-  })
-
-  if (!values?.request_notes) return
-
-  try {
-    await call('real_estate_crm_customs.api.add_interest_request', {
-      lead: props.leadId,
-      request_notes: values.request_notes,
-      request_status: values.request_status || 'Open',
-    })
-    linkedProperties.reload()
-    document.reload?.()
-    toast.success(__('Buyer request added to the interest list'))
-  } catch (err) {
-    toast.error(err.messages?.[0] || err.message || __('Error adding buyer request'))
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Unit Selection Popup
 // ---------------------------------------------------------------------------
 function openUnitSelectionPopup() {
@@ -1369,14 +1716,62 @@ function openUnitSelectionPopup() {
 }
 
 function onUnitsAdded() {
-  linkedProperties.reload()
-  document.reload?.()
+  reloadActionWeb()
   toast.success(__('Selected inventory units added to the buyer interest list'))
 }
 
 // ---------------------------------------------------------------------------
-// Seller: Assign Property Unit
+// Seller: Create or assign a property unit
 // ---------------------------------------------------------------------------
+async function addSellerProperty() {
+  if (!isSellerLead.value) {
+    toast.error(__('Add Property is available only for Seller leads.'))
+    return
+  }
+
+  const values = await renderFieldLayoutDialog({
+    title: __('Add Seller Property'),
+    size: 'lg',
+    fields: [
+      {
+        fieldname: 'project',
+        fieldtype: 'Link',
+        label: __('Project'),
+        options: 'Real Estate Project',
+        reqd: 1,
+      },
+      {
+        fieldname: 'unit_number',
+        fieldtype: 'Data',
+        label: __('Unit Number'),
+        reqd: 1,
+      },
+      {
+        fieldname: 'price',
+        fieldtype: 'Currency',
+        label: __('Target Asking Price'),
+      },
+    ],
+    submitLabel: __('Create Property'),
+  })
+  if (!values?.project || !values?.unit_number) return
+
+  try {
+    await call('real_estate_crm_customs.api.create_resale_unit', {
+      owner_lead: props.leadId,
+      project: values.project,
+      unit_number: values.unit_number,
+      price: values.price || null,
+    })
+    reloadActionWeb()
+    toast.success(__('Seller property created and linked to this lead.'))
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] || err.message || __('Error creating seller property'),
+    )
+  }
+}
+
 async function assignPropertyUnitToSeller() {
   if (doc.value.party_type !== 'Seller') {
     toast.error(__('Only seller leads can be assigned property units'))
@@ -1403,20 +1798,13 @@ async function assignPropertyUnitToSeller() {
     lead: props.leadId,
     unit: values.unit,
   })
-  linkedProperties.reload()
-  sections.reload()
-  document.reload?.()
+  reloadActionWeb()
   toast.success(__('Property unit assigned to this seller lead'))
 }
 
 // ---------------------------------------------------------------------------
 // Generic Field Update & Status
 // ---------------------------------------------------------------------------
-async function triggerStatusChange(value) {
-  await triggerOnChange('status', value)
-  setLostReason()
-}
-
 function updateField(name, value) {
   value = Array.isArray(name) ? '' : value
   let oldValues = Array.isArray(name) ? {} : doc.value[name]

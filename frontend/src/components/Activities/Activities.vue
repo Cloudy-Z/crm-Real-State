@@ -10,6 +10,29 @@
     :whatsappBox="whatsappBox"
     :modalRef="modalRef"
   />
+  <div
+    v-if="title === 'Activity'"
+    class="flex flex-col gap-2 border-b px-3 py-3 sm:flex-row sm:px-10"
+  >
+    <input
+      v-model="activitySearch"
+      type="search"
+      :placeholder="__('Search activity…')"
+      class="h-8 min-w-0 flex-1 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 outline-none focus:border-outline-gray-4"
+    />
+    <select
+      v-model="activityTypeFilter"
+      class="h-8 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 outline-none focus:border-outline-gray-4"
+    >
+      <option value="All">{{ __('All Activity') }}</option>
+      <option value="Calls">{{ __('Calls') }}</option>
+      <option value="Emails">{{ __('Emails') }}</option>
+      <option value="Comments">{{ __('Comments') }}</option>
+      <option value="Events">{{ __('Events') }}</option>
+      <option value="Attachments">{{ __('Attachments') }}</option>
+      <option value="System">{{ __('System Changes') }}</option>
+    </select>
+  </div>
   <FadedScrollableDiv class="flex flex-col h-full overflow-y-auto">
     <div
       v-if="all_activities?.loading"
@@ -197,6 +220,25 @@
               :activity="activity"
               @reload="all_activities.reload()"
             />
+          </div>
+          <div
+            v-else-if="activity.activity_type == 'event'"
+            class="mb-4 flex flex-col gap-1.5 py-1.5"
+          >
+            <div
+              class="flex flex-wrap items-center justify-between gap-2 text-sm"
+            >
+              <span class="font-medium text-ink-gray-8">{{
+                activity.data.subject
+              }}</span>
+              <span
+                class="rounded bg-surface-gray-2 px-2 py-0.5 text-xs text-ink-gray-6"
+                >{{ activity.data.status || __('Open') }}</span
+              >
+            </div>
+            <div class="text-xs text-ink-gray-5">
+              {{ formatDate(activity.data.starts_on) }}
+            </div>
           </div>
           <div
             v-else-if="activity.activity_type == 'attachment_log'"
@@ -529,6 +571,8 @@ const { document: _document } = useDocument(props.doctype, props.docname)
 const doc = computed(() => _document.doc || {})
 
 const reload_email = ref(false)
+const activitySearch = ref('')
+const activityTypeFilter = ref('All')
 const modalRef = ref(null)
 const showFilesUploader = ref(false)
 
@@ -553,6 +597,22 @@ const all_activities = createResource({
 })
 
 const showWhatsappTemplates = ref(false)
+
+const leadEvents = createResource({
+  url: 'real_estate_crm_customs.api.get_lead_smart_events',
+  params: { lead: props.docname },
+  cache: ['activityLeadEvents', props.docname],
+  auto: props.doctype === 'CRM Lead',
+  transform: (events) =>
+    (events || []).map((event) => ({
+      name: `event-${event.name}`,
+      owner: event.owner,
+      owner_name: event.owner,
+      creation: event.starts_on,
+      activity_type: 'event',
+      data: event,
+    })),
+})
 
 const whatsappMessages = createResource({
   url: 'crm.api.whatsapp.get_whatsapp_messages',
@@ -620,9 +680,10 @@ const replyMessage = ref({})
 
 function get_activities() {
   if (!all_activities.data?.versions) return []
-  if (!all_activities.data?.calls.length)
-    return all_activities.data.versions || []
-  return [...all_activities.data.versions, ...all_activities.data.calls]
+  const versions = all_activities.data.versions || []
+  const calls = all_activities.data.calls || []
+  const events = leadEvents.data || []
+  return [...versions, ...calls, ...events]
 }
 
 const activities = computed(() => {
@@ -653,6 +714,10 @@ const activities = computed(() => {
     return sortByModified(all_activities.data.attachments)
   }
 
+  if (title.value == 'Activity') {
+    _activities = _activities.filter(matchesActivityFilter)
+  }
+
   _activities.forEach((activity) => {
     activity.icon = timelineIcon(activity.activity_type, activity.is_lead)
 
@@ -674,6 +739,37 @@ const activities = computed(() => {
   })
   return sortByCreation(_activities)
 })
+
+function matchesActivityFilter(activity) {
+  const type = activity.activity_type
+  const filterMatches =
+    activityTypeFilter.value === 'All' ||
+    (activityTypeFilter.value === 'Calls' &&
+      ['incoming_call', 'outgoing_call'].includes(type)) ||
+    (activityTypeFilter.value === 'Emails' && type === 'communication') ||
+    (activityTypeFilter.value === 'Comments' && type === 'comment') ||
+    (activityTypeFilter.value === 'Events' && type === 'event') ||
+    (activityTypeFilter.value === 'Attachments' && type === 'attachment_log') ||
+    (activityTypeFilter.value === 'System' &&
+      ['creation', 'added', 'removed', 'changed'].includes(type))
+
+  const search = activitySearch.value.trim().toLowerCase()
+  if (!filterMatches || !search) return filterMatches
+  const haystack = [
+    activity.owner_name,
+    activity.owner,
+    activity.subject,
+    activity.content,
+    activity.status,
+    activity.type,
+    activity.value,
+    JSON.stringify(activity.data || {}),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(search)
+}
 
 function sortByCreation(list) {
   return list.sort((a, b) => new Date(a.creation) - new Date(b.creation))
@@ -817,6 +913,7 @@ const whatsappBox = ref(null)
 watch([reload, reload_email], ([reload_value, reload_email_value]) => {
   if (reload_value || reload_email_value) {
     all_activities.reload()
+    if (props.doctype === 'CRM Lead') leadEvents.reload()
     _document.reload()
     reload.value = false
     reload_email.value = false

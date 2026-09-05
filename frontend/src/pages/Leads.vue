@@ -310,11 +310,19 @@ const { showModal } = useDoctypeModal()
 
 const route = useRoute()
 
+function leadTypeFromRoute() {
+  const routeValue = String(
+    route.query.party_type || route.query.lead_scope || '',
+  ).toLowerCase()
+  if (['seller', 'sellers'].includes(routeValue)) return 'Seller'
+  if (['buyer', 'buyers'].includes(routeValue)) return 'Buyer'
+  return null
+}
+
 const lockedLeadFilters = computed(() => {
-  let filters = { converted: 0 }
-  if (['Buyer', 'Seller'].includes(route.query.party_type)) {
-    filters.party_type = route.query.party_type
-  }
+  const filters = { converted: 0 }
+  const partyType = leadTypeFromRoute()
+  if (partyType) filters.party_type = partyType
   return filters
 })
 
@@ -333,9 +341,8 @@ const defaults = reactive({})
 
 function applyLeadTypeDefault() {
   delete defaults.party_type
-  if (['Buyer', 'Seller'].includes(route.query.party_type)) {
-    defaults.party_type = route.query.party_type
-  }
+  const partyType = leadTypeFromRoute()
+  if (partyType) defaults.party_type = partyType
 }
 
 function openLeadModal() {
