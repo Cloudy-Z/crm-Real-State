@@ -71,69 +71,27 @@
           </div>
           <div class="flex-1 overflow-auto p-5">
             <div v-if="isBuyerLead" class="mb-5 flex flex-col gap-4">
-              <!-- Card 1: Gated Actions (top) -->
-              <div
-                class="rounded border border-outline-gray-1 bg-surface-white p-4"
-              >
-                <div class="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <div class="text-sm font-medium text-ink-gray-9">
-                      {{ __('Lead Actions') }}
-                    </div>
-                    <div class="text-xs text-ink-gray-6">
-                      {{
-                        __('Available actions based on current lead status: ')
-                      }}
-                      <span class="font-semibold">{{
-                        doc.status || __('Fresh Lead')
-                      }}</span>
-                    </div>
-                  </div>
-                  <div
-                    v-if="doc.lead_age"
-                    class="rounded bg-surface-gray-2 px-3 py-1.5 text-xs font-medium text-ink-gray-7"
-                  >
-                    {{ __('Age') }}: {{ doc.lead_age }}
-                  </div>
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div
+                  v-if="doc.lead_age"
+                  class="rounded bg-surface-gray-2 px-3 py-1.5 text-xs font-medium text-ink-gray-7"
+                >
+                  {{ __('Lead Age') }}: {{ doc.lead_age }}
                 </div>
-                <!-- Gated Action Buttons -->
-                <div class="flex flex-wrap gap-2">
-                  <!-- Fresh Lead: Only Call and WhatsApp -->
-                  <Button
-                    :label="__('Call')"
-                    variant="solid"
-                    @click="triggerLeadCall"
-                  />
-                  <Button
-                    :label="__('WhatsApp Message')"
-                    variant="subtle"
-                    @click="openWhatsAppWithSubject"
-                  />
-                  <!-- After call: Log Call button -->
-                  <Button
-                    v-if="callStarted || doc.last_call_outcome"
-                    :label="__('Log Call Result')"
-                    variant="solid"
-                    theme="orange"
-                    @click="openCallLogDialog"
-                  />
-                  <!-- Interested status: Schedule Next Action -->
-                  <Button
-                    v-if="isInterestedOrBeyond"
-                    :label="__('Schedule Next Action')"
-                    variant="solid"
-                    theme="green"
-                    @click="openNextActionDialog"
-                  />
-                  <!-- Log Meeting Result (when events exist) -->
-                  <Button
-                    v-if="isInterestedOrBeyond"
-                    :label="__('Log Meeting Result')"
-                    variant="subtle"
-                    @click="openMeetingResultDialog"
-                  />
-                </div>
+                <Button
+                  :label="__('WhatsApp Message')"
+                  variant="subtle"
+                  @click="openWhatsAppWithSubject"
+                />
               </div>
+              <LeadActionWeb
+                :context="actionContext.data || {}"
+                :loading="actionContext.loading"
+                @start-action="startDynamicAction"
+                @complete-action="openCallLogDialog"
+                @plan-action="openNextActionDialog"
+                @cancel-action="cancelDynamicAction"
+              />
 
               <!-- Card 2: Flags (No-Answer Tracking) -->
               <div
@@ -219,17 +177,17 @@
                     <Button
                       :label="__('Add Interest')"
                       variant="solid"
-                      @click="openInterestDeterminationDialog"
+                      @click="openInterestWorkflow"
                     />
                     <Button
                       :label="__('Browse Units')"
                       variant="subtle"
-                      @click="openUnitSelectionPopup"
+                      @click="openInterestWorkflow"
                     />
                     <Button
                       :label="__('Edit Existing')"
                       variant="subtle"
-                      @click="openExistingInterestEditor"
+                      @click="openInterestWorkflow"
                     />
                   </div>
                 </div>
@@ -521,11 +479,6 @@
     doctype="CRM Lead"
     :document="document"
   />
-  <UnitSelectionDialog
-    v-model="showUnitSelectionDialog"
-    :lead-id="leadId"
-    @units-added="onUnitsAdded"
-  />
 </template>
 <script setup>
 import DeleteLinkedDocModal from '@/components/DeleteLinkedDocModal.vue'
@@ -551,10 +504,10 @@ import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
-import UnitSelectionDialog from '@/components/Modals/UnitSelectionDialog.vue'
 import LeadProgressGraph from '@/components/LeadProgressGraph.vue'
 import LeadSmartEvents from '@/components/LeadSmartEvents.vue'
 import LeadInterestGroups from '@/components/LeadInterestGroups.vue'
+import LeadActionWeb from '@/components/LeadActionWeb.vue'
 import {
   setupCustomizations,
   copyToClipboard,
@@ -605,8 +558,6 @@ const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
 const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
-const showUnitSelectionDialog = ref(false)
-const callStarted = ref(false)
 
 const { triggerOnRender, assignees, permissions, document, scripts, error } =
   useDocument('CRM Lead', props.leadId)
@@ -616,13 +567,6 @@ const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 const doc = computed(() => document.doc || {})
 const isBuyerLead = computed(() => doc.value.party_type !== 'Seller')
 const isSellerLead = computed(() => doc.value.party_type === 'Seller')
-const isInterestedOrBeyond = computed(() => {
-  const s = doc.value.status
-  return (
-    doc.value.interest_status === 'Interested' ||
-    (s && !['New', 'Fresh Lead'].includes(s))
-  )
-})
 
 onMounted(async () => {
   if (document.doc) await triggerOnRender()
@@ -754,6 +698,13 @@ const leadProgress = createResource({
 const interestWorkflow = createResource({
   url: 'real_estate_crm_customs.api.get_interest_workflow_context',
   cache: ['interestWorkflow', props.leadId],
+  params: { lead: props.leadId },
+  auto: true,
+})
+
+const actionContext = createResource({
+  url: 'real_estate_crm_customs.api.get_lead_action_context',
+  cache: ['leadActionContext', props.leadId],
   params: { lead: props.leadId },
   auto: true,
 })
@@ -935,7 +886,24 @@ function openWhatsAppDirect() {
 // ---------------------------------------------------------------------------
 // 2. Call (trigger phone call)
 // ---------------------------------------------------------------------------
-function triggerLeadCall() {
+async function triggerLeadCall() {
+  const currentAction = actionContext.data?.current_action
+  if (!currentAction || currentAction.action_type !== 'Call') {
+    toast.info(
+      __(
+        'Plan or start the current Call workflow action before dialing this lead.',
+      ),
+    )
+    return
+  }
+  if (['Planned', 'Due'].includes(currentAction.workflow_status)) {
+    await startDynamicAction(currentAction)
+    return
+  }
+  executePhoneCall()
+}
+
+function executePhoneCall() {
   const number = doc.value.mobile_no || doc.value.whatsapp_number
   if (!number) {
     toast.error(__('Please set a mobile number for this lead'))
@@ -944,7 +912,6 @@ function triggerLeadCall() {
   // Phone fieldtype stores as +CC-XXXXXXXXXX (e.g. +20-1070009839)
   // For tel: URI, replace hyphen with nothing to get +CCXXXXXXXXXX
   const fullPhone = number.replace(/-/g, '')
-  callStarted.value = true
   if (callEnabled.value) {
     makeCall(fullPhone)
     return
@@ -953,139 +920,675 @@ function triggerLeadCall() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Call Log Dialog — Sequential: Outcome → Interest → Next Action
+// 3. Dynamic Action Web — each result closes only its current action
 // ---------------------------------------------------------------------------
-async function openCallLogDialog() {
-  const contactResult = await renderFieldLayoutDialog({
-    title: __('Log Call Result'),
-    fields: [
-      {
-        fieldname: 'outcome',
-        fieldtype: 'Select',
-        label: __('Contact Result'),
-        options: '\nAnswered\nNo Answer',
-        reqd: 1,
-      },
-    ],
-    submitLabel: __('Continue'),
-  })
-  if (!contactResult?.outcome) return
-
-  if (contactResult.outcome === 'No Answer') {
-    const scheduleValues = await renderFieldLayoutDialog({
-      title: __('Schedule Next Call Attempt'),
-      fields: [
-        {
-          fieldname: 'schedule_next_call',
-          fieldtype: 'Datetime',
-          label: __('Next Call Date & Time'),
-          reqd: 1,
-        },
-      ],
-      submitLabel: __('Save & Schedule'),
-    })
-    if (!scheduleValues?.schedule_next_call) return
-
-    try {
-      const result = await call(
-        'real_estate_crm_customs.api.record_call_outcome',
-        {
-          lead: props.leadId,
-          outcome: 'No Answer',
-          schedule_next_call: scheduleValues.schedule_next_call,
-        },
-      )
-      updateLeadActionState(result)
-      reloadActionWeb()
-      toast.success(__('No-answer recorded. Next call scheduled.'))
-    } catch (err) {
-      toast.error(
-        err.messages?.[0] || err.message || __('Error recording call outcome'),
-      )
-    }
-    return
-  }
-
+async function startDynamicAction(action) {
   try {
-    const result = await call(
-      'real_estate_crm_customs.api.record_call_outcome',
-      {
-        lead: props.leadId,
-        outcome: 'Answered',
-      },
+    const result = await call('real_estate_crm_customs.api.start_lead_action', {
+      lead: props.leadId,
+      action_name: action.name,
+    })
+    if (action.action_type === 'Call') executePhoneCall()
+    reloadActionWeb()
+    toast.success(
+      __('Action started. Complete this action when its result is known.'),
     )
-    updateLeadActionState(result)
+    return result?.action || action
   } catch (err) {
     toast.error(
-      err.messages?.[0] || err.message || __('Error recording call outcome'),
+      err.messages?.[0] || err.message || __('Could not start action'),
     )
-    return
+    return null
   }
+}
 
-  const qualification = await renderFieldLayoutDialog({
-    title: __('Mandatory Call Outcome'),
+async function cancelDynamicAction(action) {
+  const values = await renderFieldLayoutDialog({
+    title: __('Cancel Current Action'),
     fields: [
       {
-        fieldname: 'interest_outcome',
-        fieldtype: 'Select',
-        label: __('Qualification Outcome'),
-        options: '\nInterested\nNot Interested',
+        fieldname: 'reason',
+        fieldtype: 'Small Text',
+        label: __('Cancellation reason'),
         reqd: 1,
       },
     ],
-    submitLabel: __('Save Outcome'),
+    submitLabel: __('Cancel Action'),
   })
-  if (!qualification?.interest_outcome) return
+  if (!values?.reason) return
 
-  const isInterested = qualification.interest_outcome === 'Interested'
+  const nextAction = actionNeedsNextAction(action, { outcome: 'Cancelled' })
+    ? await collectNextAction(action, { outcome: 'Cancelled' })
+    : null
+  if (actionNeedsNextAction(action, { outcome: 'Cancelled' }) && !nextAction)
+    return
+
+  try {
+    await call('real_estate_crm_customs.api.cancel_lead_action', {
+      lead: props.leadId,
+      action_name: action.name,
+      reason: values.reason,
+      next_action: nextAction ? JSON.stringify(nextAction) : null,
+    })
+    reloadActionWeb()
+    toast.success(
+      __('Action cancelled and the required follow-up was preserved.'),
+    )
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] || err.message || __('Could not cancel action'),
+    )
+  }
+}
+
+async function openCallLogDialog(action = null) {
+  const currentAction = action || actionContext.data?.current_action
+  if (!currentAction) {
+    toast.info(__('There is no current workflow action to complete.'))
+    return
+  }
+
+  if (currentAction.action_type === 'Add Interest') {
+    await completeInterestAction(currentAction)
+    return
+  }
+
+  const rawValues = await collectActionResult(currentAction)
+  if (!rawValues) return
+  const values = normalizeActionResult(currentAction, rawValues)
+
+  if (actionNeedsNextAction(currentAction, values)) {
+    const nextAction = await collectNextAction(currentAction, values)
+    if (!nextAction) return
+    values.next_action = nextAction
+  }
+
   try {
     const result = await call(
-      'real_estate_crm_customs.api.record_interest_determination',
+      'real_estate_crm_customs.api.complete_lead_action',
       {
         lead: props.leadId,
-        interested: isInterested ? 1 : 0,
-        qualification_only: isInterested ? 1 : 0,
+        action_name: currentAction.name,
+        result_data: JSON.stringify(values),
+        client_request_id: createClientRequestId(),
+        expected_modified: currentAction.modified,
       },
     )
     updateLeadActionState(result)
     reloadActionWeb()
+    toast.success(
+      __('Action result saved. The lead workflow has been recalculated.'),
+    )
   } catch (err) {
     toast.error(
-      err.messages?.[0] ||
-        err.message ||
-        __('Error recording call qualification'),
+      err.messages?.[0] || err.message || __('Could not save action result'),
     )
-    return
+  }
+}
+
+function actionNeedsNextAction(action, values) {
+  if (values.outcome === 'Rescheduled') return false
+  if (
+    action.action_type === 'Call' &&
+    action.purpose === 'Initial Qualification'
+  ) {
+    return (
+      values.contact_result !== 'Answered' ||
+      values.qualification === 'Interested'
+    )
+  }
+  return actionContext.data?.qualification === 'Interested'
+}
+
+function createClientRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `lead-action-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+async function collectActionResult(action) {
+  const fields = actionResultFields(action)
+  const values = await renderFieldLayoutDialog({
+    title: __('Complete {0}', [action.action_type]),
+    size: 'lg',
+    fields,
+    submitLabel: __('Save Result'),
+  })
+  return values || null
+}
+
+function actionResultFields(action) {
+  if (action.action_type === 'Call') {
+    const fields = [
+      {
+        fieldname: 'contact_result',
+        fieldtype: 'Select',
+        label: __('Contact Result'),
+        options: '\nAnswered\nNo Answer\nWrong Number\nInvalid / Disconnected',
+        reqd: 1,
+      },
+    ]
+    if (action.purpose === 'Initial Qualification') {
+      fields.push(
+        {
+          fieldname: 'qualification',
+          fieldtype: 'Select',
+          label: __('Qualification Outcome'),
+          options: '\nInterested\nNot Interested',
+          depends_on: "eval:doc.contact_result=='Answered'",
+          mandatory_depends_on: "eval:doc.contact_result=='Answered'",
+        },
+        {
+          fieldname: 'closed_reason',
+          fieldtype: 'Small Text',
+          label: __('Reason for Not Interested'),
+          depends_on: "eval:doc.qualification=='Not Interested'",
+          mandatory_depends_on: "eval:doc.qualification=='Not Interested'",
+        },
+      )
+    } else if (action.purpose === 'Offer Follow-up') {
+      fields.push(
+        {
+          fieldname: 'outcome',
+          fieldtype: 'Select',
+          label: __('Offer Follow-up Outcome'),
+          options: '\nViewed\nOffer Accepted\nRejected\nNeeds Alternatives',
+          depends_on: "eval:doc.contact_result=='Answered'",
+          mandatory_depends_on: "eval:doc.contact_result=='Answered'",
+        },
+        ...interestSelectionFields(action, {
+          label: __('Offer interest record'),
+          requiredFor: ['Viewed', 'Offer Accepted', 'Rejected'],
+        }),
+      )
+    } else if (action.purpose === 'Negotiation Follow-up') {
+      fields.push(
+        {
+          fieldname: 'outcome',
+          fieldtype: 'Select',
+          label: __('Negotiation Outcome'),
+          options: '\nContinuing\nTerms Changed\nAccepted\nDeclined',
+          reqd: 1,
+        },
+        ...interestSelectionFields(action, {
+          label: __('Negotiating interest record'),
+        }),
+      )
+    } else {
+      fields.push({
+        fieldname: 'outcome',
+        fieldtype: 'Select',
+        label: __('Follow-up Outcome'),
+        options: '\nCompleted\nNeeds Callback\nConfirmed\nCancelled',
+        reqd: 1,
+      })
+    }
+    fields.push({
+      fieldname: 'result_note',
+      fieldtype: 'Small Text',
+      label: __('Result Note'),
+    })
+    return fields
   }
 
-  if (!isInterested) {
-    toast.success(__('Call logged as Not Interested.'))
-    return
+  if (action.action_type === 'Meeting') {
+    return [
+      {
+        fieldname: 'outcome',
+        fieldtype: 'Select',
+        label: __('Meeting Outcome'),
+        options: '\nDone\nNo Show\nCancelled\nRescheduled',
+        reqd: 1,
+      },
+      {
+        fieldname: 'result_note',
+        fieldtype: 'Small Text',
+        label: __('Meeting Result Note'),
+        depends_on: "eval:doc.outcome=='Done'",
+        mandatory_depends_on: "eval:doc.outcome=='Done'",
+      },
+      {
+        fieldname: 'closed_reason',
+        fieldtype: 'Small Text',
+        label: __('No Show / Cancellation Reason'),
+        depends_on: "eval:['No Show','Cancelled'].includes(doc.outcome)",
+        mandatory_depends_on:
+          "eval:['No Show','Cancelled'].includes(doc.outcome)",
+      },
+      {
+        fieldname: 'reschedule_to',
+        fieldtype: 'Datetime',
+        label: __('Reschedule To'),
+        depends_on: "eval:doc.outcome=='Rescheduled'",
+        mandatory_depends_on: "eval:doc.outcome=='Rescheduled'",
+      },
+    ]
   }
 
-  const actionValues = await renderFieldLayoutDialog({
-    title: __('Interested — Next Action Required'),
+  if (action.action_type === 'Showing') {
+    return [
+      {
+        fieldname: 'outcome',
+        fieldtype: 'Select',
+        label: __('Showing Outcome'),
+        options:
+          '\nCompleted\nBuyer No Show\nSeller/Unit Unavailable\nCancelled\nRescheduled',
+        reqd: 1,
+      },
+      {
+        fieldname: 'unit_outcome',
+        fieldtype: 'Select',
+        label: __('Unit Outcome'),
+        options: '\nInterested\nConsidering\nRejected\nNo Feedback',
+        depends_on: "eval:doc.outcome=='Completed'",
+        mandatory_depends_on: "eval:doc.outcome=='Completed'",
+      },
+      {
+        fieldname: 'result_note',
+        fieldtype: 'Small Text',
+        label: __('Showing Note'),
+      },
+      {
+        fieldname: 'closed_reason',
+        fieldtype: 'Small Text',
+        label: __('Reason'),
+        depends_on:
+          "eval:['Buyer No Show','Seller/Unit Unavailable','Cancelled'].includes(doc.outcome)",
+        mandatory_depends_on:
+          "eval:['Buyer No Show','Seller/Unit Unavailable','Cancelled'].includes(doc.outcome)",
+      },
+      {
+        fieldname: 'reschedule_to',
+        fieldtype: 'Datetime',
+        label: __('Reschedule To'),
+        depends_on: "eval:doc.outcome=='Rescheduled'",
+        mandatory_depends_on: "eval:doc.outcome=='Rescheduled'",
+      },
+    ]
+  }
+
+  if (action.action_type === 'Send Offer') {
+    return [
+      {
+        fieldname: 'outcome',
+        fieldtype: 'Select',
+        label: __('Offer Dispatch Result'),
+        options: '\nDispatched',
+        default: 'Dispatched',
+        read_only: 1,
+        reqd: 1,
+      },
+      {
+        fieldname: 'result_note',
+        fieldtype: 'Small Text',
+        label: __('Offer Message / Dispatch Note'),
+        reqd: 1,
+      },
+      ...interestSelectionFields(action, {
+        label: __('Offer interest record'),
+      }),
+    ]
+  }
+
+  return [
+    {
+      fieldname: 'outcome',
+      fieldtype: 'Select',
+      label: __('Negotiation Outcome'),
+      options: '\nContinuing\nTerms Changed\nAccepted\nDeclined',
+      reqd: 1,
+    },
+    ...interestSelectionFields(action, {
+      label: __('Negotiating interest record'),
+    }),
+    {
+      fieldname: 'result_note',
+      fieldtype: 'Small Text',
+      label: __('Result Note'),
+    },
+  ]
+}
+
+function scopedInterestRows(action) {
+  const contextRows = actionContext.data?.interest_rows || []
+  const scopedNames = action?.interest_rows || []
+  if (!scopedNames.length) return contextRows
+  return contextRows.filter((row) => scopedNames.includes(row.name))
+}
+
+function interestSelectionFields(action, { label, requiredFor = null }) {
+  const rows = scopedInterestRows(action)
+  const outcomeExpression = requiredFor
+    ? `eval:${JSON.stringify(requiredFor)}.includes(doc.outcome)`
+    : null
+  return rows.map((row, index) => ({
+    fieldname: `interest_row_${index}`,
+    fieldtype: 'Check',
+    label: `${label}: ${row.label}`,
+    default: rows.length === 1 ? 1 : 0,
+    depends_on: outcomeExpression || undefined,
+  }))
+}
+
+function normalizeActionResult(action, values) {
+  const result = { ...values }
+  const rows = scopedInterestRows(action)
+  const selectedRows = rows
+    .filter((_row, index) => Boolean(values[`interest_row_${index}`]))
+    .map((row) => row.name)
+  Object.keys(result)
+    .filter((fieldname) => fieldname.startsWith('interest_row_'))
+    .forEach((fieldname) => delete result[fieldname])
+  if (selectedRows.length) result.interest_rows = selectedRows
+  return result
+}
+
+async function collectNextAction(action, values) {
+  const definitions = nextActionDefinitions(action, values)
+  if (!definitions.length) {
+    toast.error(
+      __('No next action is permitted in the current workflow context.'),
+    )
+    return null
+  }
+
+  const options = definitions.map(actionOptionLabel)
+  const selector = await renderFieldLayoutDialog({
+    title: __('Required Next Action'),
     fields: [
       {
-        fieldname: 'next_action',
+        fieldname: 'selection',
         fieldtype: 'Select',
-        label: __('Next Action'),
-        options: '\nAdd Interest\nMeeting\nShowing\nNext Call',
+        label: __('Choose the next action'),
+        options: `\n${options.join('\n')}`,
         reqd: 1,
       },
     ],
     submitLabel: __('Continue'),
   })
-  if (!actionValues?.next_action) return
+  if (!selector?.selection) return null
+  const definition = definitions[options.indexOf(selector.selection)]
+  return collectActionPlan(definition, action, values)
+}
 
-  if (actionValues.next_action === 'Add Interest') {
-    await openInterestDeterminationDialog()
-  } else if (actionValues.next_action === 'Meeting') {
-    await openNextActionDialog('Meeting')
-  } else if (actionValues.next_action === 'Showing') {
-    await openNextActionDialog('Showing')
-  } else if (actionValues.next_action === 'Next Call') {
-    await openNextActionDialog('Call')
+function nextActionDefinitions(action, values) {
+  if (
+    action.action_type === 'Call' &&
+    action.purpose === 'Initial Qualification' &&
+    values.contact_result === 'Answered' &&
+    values.qualification === 'Interested'
+  ) {
+    return derivePolicyActions(simulateInterestFacts(action, values))
+  }
+  if (
+    values.qualification === 'Interested' ||
+    actionContext.data?.qualification === 'Interested'
+  ) {
+    return derivePolicyActions(simulateInterestFacts(action, values))
+  }
+  return actionContext.data?.allowed_next_actions || []
+}
+
+function simulateInterestFacts(action, values) {
+  const selected = new Set(values.interest_rows || action.interest_rows || [])
+  return (actionContext.data?.interest_rows || [])
+    .map((row) => {
+      const simulated = { ...row }
+      if (!selected.has(row.name)) return simulated
+
+      if (
+        action.action_type === 'Send Offer' &&
+        values.outcome === 'Dispatched'
+      ) {
+        simulated.offer_sent = 1
+        simulated.proposal_status = 'Sent'
+      }
+      if (
+        action.action_type === 'Call' &&
+        action.purpose === 'Offer Follow-up'
+      ) {
+        if (values.outcome === 'Offer Accepted')
+          simulated.proposal_status = 'Offer Accepted'
+        if (values.outcome === 'Rejected') simulated.rejected = true
+      }
+      if (action.action_type === 'Showing' && values.outcome === 'Completed') {
+        if (values.unit_outcome === 'Interested')
+          simulated.proposal_status = 'Offer Accepted'
+        if (values.unit_outcome === 'Rejected') simulated.rejected = true
+      }
+      if (action.action_type === 'Negotiation Follow-up') {
+        if (values.outcome === 'Declined') simulated.rejected = true
+        else simulated.proposal_status = 'Offer Accepted'
+      }
+      return simulated
+    })
+    .filter((row) => !row.rejected)
+}
+
+function derivePolicyActions(rows) {
+  const inventoryRows = rows.filter((row) => row.unit)
+  const unsentRows = inventoryRows.filter((row) => !row.offer_sent)
+  const sentRows = inventoryRows.filter(
+    (row) => row.offer_sent && row.proposal_status !== 'Rejected',
+  )
+  const negotiatingRows = sentRows.filter(
+    (row) => row.proposal_status === 'Offer Accepted',
+  )
+  const definitions = [
+    {
+      action_type: 'Add Interest',
+      purpose: 'Requirements Discovery',
+      label: __('Add or update buyer interest'),
+      requires_interest_rows: false,
+      requires_unit: false,
+    },
+    {
+      action_type: 'Call',
+      purpose: 'General Follow-up',
+      label: __('Schedule follow-up call'),
+      requires_interest_rows: false,
+      requires_unit: false,
+    },
+    {
+      action_type: 'Meeting',
+      purpose: 'Discovery Meeting',
+      label: __('Schedule discovery meeting'),
+      requires_interest_rows: false,
+      requires_unit: false,
+    },
+  ]
+  if (unsentRows.length) {
+    definitions.push({
+      action_type: 'Send Offer',
+      purpose: 'Offer Follow-up',
+      label: __('Send offer for selected interest units'),
+      requires_interest_rows: true,
+      requires_unit: false,
+      interest_row_names: unsentRows.map((row) => row.name),
+    })
+  }
+  if (sentRows.length) {
+    definitions.push({
+      action_type: 'Call',
+      purpose: 'Offer Follow-up',
+      label: __('Schedule offer follow-up'),
+      requires_interest_rows: true,
+      requires_unit: false,
+      interest_row_names: sentRows.map((row) => row.name),
+    })
+  }
+  if (negotiatingRows.length) {
+    const rowNames = negotiatingRows.map((row) => row.name)
+    definitions.push(
+      {
+        action_type: 'Negotiation Follow-up',
+        purpose: 'Negotiation Follow-up',
+        label: __('Record negotiation follow-up'),
+        requires_interest_rows: true,
+        requires_unit: false,
+        interest_row_names: rowNames,
+      },
+      {
+        action_type: 'Showing',
+        purpose: 'Showing Confirmation',
+        label: __('Schedule showing for negotiating unit'),
+        requires_interest_rows: true,
+        requires_unit: true,
+        interest_row_names: rowNames,
+      },
+    )
+  }
+  return definitions
+}
+
+function actionOptionLabel(definition) {
+  return `${definition.action_type} — ${definition.purpose}`
+}
+
+async function collectActionPlan(definition) {
+  const immediate = definition.action_type === 'Add Interest'
+  const requiresRows =
+    definition.requires_interest_rows || definition.action_type === 'Showing'
+  const planScope = definition.interest_row_names?.length
+    ? { interest_rows: definition.interest_row_names }
+    : null
+  const planRows = scopedInterestRows(planScope)
+  const fields = []
+
+  if (!immediate) {
+    fields.push({
+      fieldname: 'scheduled_start',
+      fieldtype: 'Datetime',
+      label: __('Scheduled Date & Time'),
+      reqd: 1,
+    })
+  }
+  if (definition.action_type === 'Showing') {
+    fields.push({
+      fieldname: 'showing_interest_selection',
+      fieldtype: 'Select',
+      label: __('Showing Unit Interest'),
+      options: `\n${planRows.map((row) => row.label).join('\n')}`,
+      reqd: 1,
+    })
+  } else if (definition.requires_unit) {
+    fields.push({
+      fieldname: 'unit',
+      fieldtype: 'Link',
+      label: __('Related Unit'),
+      options: 'Real Estate Unit',
+      reqd: 1,
+    })
+  }
+  if (requiresRows && definition.action_type !== 'Showing') {
+    fields.push(
+      ...interestSelectionFields(planScope, {
+        label: __('Scope interest record'),
+      }),
+    )
+  }
+  fields.push({
+    fieldname: 'notes',
+    fieldtype: 'Small Text',
+    label: __('Planning Notes'),
+  })
+
+  const values = await renderFieldLayoutDialog({
+    title: definition.label || __('Plan Next Action'),
+    size: 'lg',
+    fields,
+    submitLabel: immediate ? __('Continue') : __('Plan Action'),
+  })
+  if (!values) return null
+
+  const normalized = normalizeActionResult(planScope, values)
+  if (definition.action_type === 'Showing') {
+    const selectedRow = planRows.find(
+      (row) => row.label === normalized.showing_interest_selection,
+    )
+    delete normalized.showing_interest_selection
+    if (!selectedRow?.unit) {
+      toast.error(__('Select one inventory-unit interest for the showing.'))
+      return null
+    }
+    normalized.interest_rows = [selectedRow.name]
+    normalized.unit = selectedRow.unit
+  }
+  if (requiresRows && !normalized.interest_rows?.length) {
+    toast.error(__('Select at least one scoped interest record.'))
+    return null
+  }
+  return {
+    action_type: definition.action_type,
+    purpose: definition.purpose,
+    scheduled_start: immediate
+      ? frappeNowDateTime()
+      : normalized.scheduled_start,
+    unit: normalized.unit || null,
+    interest_rows: normalized.interest_rows || [],
+    notes: normalized.notes || null,
+  }
+}
+
+function frappeNowDateTime() {
+  const now = new Date()
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+}
+
+async function openInterestWorkflow() {
+  const action = actionContext.data?.current_action
+  if (action?.action_type === 'Add Interest') {
+    const currentAction = ['Planned', 'Due'].includes(action.workflow_status)
+      ? await startDynamicAction(action)
+      : action
+    if (!currentAction) return
+    await completeInterestAction(currentAction)
+    return
+  }
+  if (action) {
+    toast.info(
+      __(
+        'Complete, reschedule, or cancel the current action before changing buyer interests.',
+      ),
+    )
+    return
+  }
+  const definition = (actionContext.data?.allowed_actions || []).find(
+    (item) => item.action_type === 'Add Interest',
+  )
+  if (!definition) {
+    toast.info(
+      __('An interest action is not available for this lead at the moment.'),
+    )
+    return
+  }
+  await openNextActionDialog(definition)
+}
+
+async function completeInterestAction(action) {
+  const result = await openInterestDeterminationDialog()
+  if (!result) return
+  await actionContext.reload()
+  const values = { outcome: result }
+  const nextAction = await collectNextAction(action, values)
+  if (!nextAction) return
+  values.next_action = nextAction
+  try {
+    await call('real_estate_crm_customs.api.complete_lead_action', {
+      lead: props.leadId,
+      action_name: action.name,
+      result_data: JSON.stringify(values),
+      client_request_id: createClientRequestId(),
+      expected_modified: action.modified,
+    })
+    reloadActionWeb()
+    toast.success(__('Interest action completed and next action scheduled.'))
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] ||
+        err.message ||
+        __('Could not complete interest action'),
+    )
   }
 }
 
@@ -1110,10 +1613,9 @@ async function openInterestDeterminationDialog() {
       ],
       submitLabel: __('Continue'),
     })
-    if (!choice?.action) return
+    if (!choice?.action) return null
     if (choice.action === 'Edit Existing Interest') {
-      await openExistingInterestEditor()
-      return
+      return (await openExistingInterestEditor()) ? 'Updated' : null
     }
   }
 
@@ -1187,7 +1689,7 @@ async function openInterestDeterminationDialog() {
     ],
     submitLabel: __('Save Interest'),
   })
-  if (!interestValues?.interest_category) return
+  if (!interestValues?.interest_category) return null
 
   try {
     const interestData = {
@@ -1214,179 +1716,49 @@ async function openInterestDeterminationDialog() {
     updateLeadActionState(result)
     reloadActionWeb()
     toast.success(__('Interest added successfully.'))
+    return 'Added'
   } catch (err) {
     toast.error(
       err.messages?.[0] || err.message || __('Error recording interest'),
     )
+    return null
   }
 }
 
 // ---------------------------------------------------------------------------
-// 5. Next Action Scheduling Dialog
+// 5. Dynamic planning — only policy-approved actions can be created
 // ---------------------------------------------------------------------------
-async function openNextActionDialog(defaultActionType = null) {
-  let values = await renderFieldLayoutDialog({
-    title: __('Schedule Next Action'),
-    size: 'lg',
-    fields: [
-      {
-        fieldname: 'action_type',
-        fieldtype: 'Select',
-        label: __('Action Type'),
-        options: '\nCall\nMeeting\nShowing\nSend Offer',
-        reqd: 1,
-        default: defaultActionType || '',
-      },
-      {
-        fieldname: 'starts_on',
-        fieldtype: 'Datetime',
-        label: __('Scheduled Date & Time'),
-        reqd: 1,
-      },
-      {
-        fieldname: 'subject',
-        fieldtype: 'Data',
-        label: __('Subject / Title'),
-      },
-      {
-        fieldname: 'notes',
-        fieldtype: 'Small Text',
-        label: __('Notes'),
-      },
-      {
-        fieldname: 'target_unit',
-        fieldtype: 'Link',
-        label: __('Target Unit (for Showing)'),
-        options: 'Real Estate Unit',
-        depends_on: "eval:doc.action_type=='Showing'",
-        mandatory_depends_on: "eval:doc.action_type=='Showing'",
-      },
-    ],
-    submitLabel: __('Schedule'),
-  })
-
-  if (!values?.action_type || !values?.starts_on) return
-
-  try {
-    const result = await call(
-      'real_estate_crm_customs.api.schedule_next_action',
-      {
-        lead: props.leadId,
-        action_type: values.action_type,
-        starts_on: values.starts_on,
-        subject: values.subject || null,
-        notes: values.notes || null,
-        target_unit: values.target_unit || null,
-      },
+async function openNextActionDialog(definition = null) {
+  const contextDefinition =
+    definition && typeof definition === 'object' ? definition : null
+  const definitions = actionContext.data?.allowed_actions || []
+  const selectedDefinition = contextDefinition || definitions[0]
+  if (!selectedDefinition) {
+    toast.info(
+      __('Complete, reschedule, or cancel the current required action first.'),
     )
-    updateLeadActionState(result)
-    reloadActionWeb()
-    let msg = __('Next action scheduled: {0}', [values.action_type])
-    if (result?.unit_showing_recorded) {
-      msg += ' ' + __('(Showing recorded on unit and seller lead)')
-    }
-    toast.success(msg)
-  } catch (err) {
-    toast.error(
-      err.messages?.[0] || err.message || __('Error scheduling next action'),
-    )
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 6. Meeting/Showing Result Dialog
-// ---------------------------------------------------------------------------
-async function openMeetingResultDialog() {
-  // First fetch upcoming events for this lead
-  let events
-  try {
-    events = await call(
-      'real_estate_crm_customs.api.get_lead_upcoming_events',
-      {
-        lead: props.leadId,
-      },
-    )
-  } catch {
-    toast.error(__('Could not load events'))
     return
   }
 
-  if (!events || !events.length) {
-    toast.info(__('No pending meetings or showings to log results for.'))
-    return
-  }
-
-  // Build event options
-  const eventOptions = events
-    .map((e) => `${e.name} — ${e.subject} (${e.starts_on})`)
-    .join('\n')
-
-  let values = await renderFieldLayoutDialog({
-    title: __('Log Meeting / Showing Result'),
-    size: 'lg',
-    fields: [
-      {
-        fieldname: 'event_selection',
-        fieldtype: 'Select',
-        label: __('Select Event'),
-        options: '\n' + eventOptions,
-        reqd: 1,
-      },
-      {
-        fieldname: 'result',
-        fieldtype: 'Select',
-        label: __('Result'),
-        options: '\nDone\nCancelled\nRescheduled',
-        reqd: 1,
-      },
-      {
-        fieldname: 'result_note',
-        fieldtype: 'Small Text',
-        label: __('Result Notes (mandatory if Done)'),
-        mandatory_depends_on: "eval:doc.result=='Done'",
-      },
-      {
-        fieldname: 'reschedule_to',
-        fieldtype: 'Datetime',
-        label: __('Reschedule To (new date/time)'),
-        depends_on: "eval:doc.result=='Rescheduled'",
-        mandatory_depends_on: "eval:doc.result=='Rescheduled'",
-      },
-      {
-        fieldname: 'target_unit',
-        fieldtype: 'Link',
-        label: __('Related Unit (if Showing)'),
-        options: 'Real Estate Unit',
-      },
-    ],
-    submitLabel: __('Log Result'),
-  })
-
-  if (!values?.event_selection || !values?.result) return
-
-  // Extract event name from selection
-  const eventName = values.event_selection.split(' — ')[0]
+  const actionPlan = await collectActionPlan(selectedDefinition)
+  if (!actionPlan) return
 
   try {
-    await call('real_estate_crm_customs.api.log_meeting_result', {
+    await call('real_estate_crm_customs.api.plan_lead_action', {
       lead: props.leadId,
-      event_name: eventName,
-      result: values.result,
-      result_note: values.result_note || null,
-      reschedule_to: values.reschedule_to || null,
-      target_unit: values.target_unit || null,
+      action_type: actionPlan.action_type,
+      purpose: actionPlan.purpose,
+      scheduled_start: actionPlan.scheduled_start,
+      notes: actionPlan.notes,
+      unit: actionPlan.unit,
+      interest_rows: JSON.stringify(actionPlan.interest_rows || []),
     })
     reloadActionWeb()
-    toast.success(__('Meeting result logged: {0}', [values.result]))
-
-    // After Done or Cancelled → prompt next action
-    if (values.result === 'Done' || values.result === 'Cancelled') {
-      await openNextActionDialog()
-    }
-  } catch (err) {
-    toast.error(
-      err.messages?.[0] || err.message || __('Error logging meeting result'),
+    toast.success(
+      __('Workflow action planned. It is now the lead’s required next action.'),
     )
+  } catch (err) {
+    toast.error(err.messages?.[0] || err.message || __('Could not plan action'))
   }
 }
 
@@ -1399,7 +1771,7 @@ async function openExistingInterestEditor() {
   )
   if (!rows.length) {
     toast.info(__('No existing interest record is available to edit.'))
-    return
+    return false
   }
   const labels = rows.map((row) => interestOptionLabel(row))
   const values = await renderFieldLayoutDialog({
@@ -1415,9 +1787,9 @@ async function openExistingInterestEditor() {
     ],
     submitLabel: __('Edit'),
   })
-  if (!values?.selection) return
+  if (!values?.selection) return false
   const index = labels.indexOf(values.selection)
-  if (index >= 0) await editInterestRecord(rows[index])
+  return index >= 0 ? editInterestRecord(rows[index]) : false
 }
 
 async function editInterestRecord(row) {
@@ -1498,7 +1870,7 @@ async function editInterestRecord(row) {
     ],
     submitLabel: __('Save Changes'),
   })
-  if (!values) return
+  if (!values) return false
 
   try {
     await call('real_estate_crm_customs.api.update_interest_record', {
@@ -1508,10 +1880,12 @@ async function editInterestRecord(row) {
     })
     reloadActionWeb()
     toast.success(__('Interest record updated.'))
+    return true
   } catch (err) {
     toast.error(
       err.messages?.[0] || err.message || __('Error updating interest record'),
     )
+    return false
   }
 }
 
@@ -1610,6 +1984,7 @@ function reloadActionWeb() {
   interestWorkflow.reload()
   leadProgress.reload()
   smartEvents.value?.reload?.()
+  actionContext.reload()
   activities.value?.all_activities?.reload?.()
 }
 
@@ -1709,16 +2084,8 @@ async function editBuyerInterestPreferences() {
 }
 
 // ---------------------------------------------------------------------------
-// Unit Selection Popup
+// Unit selection remains available through the Add Interest workflow action.
 // ---------------------------------------------------------------------------
-function openUnitSelectionPopup() {
-  showUnitSelectionDialog.value = true
-}
-
-function onUnitsAdded() {
-  reloadActionWeb()
-  toast.success(__('Selected inventory units added to the buyer interest list'))
-}
 
 // ---------------------------------------------------------------------------
 // Seller: Create or assign a property unit
