@@ -473,6 +473,15 @@
     :docname="leadId"
     name="Leads"
   />
+  <UnitSelectionDialog
+    v-model="showInterestUnitPicker"
+    :lead-id="leadId"
+    :interest-category="interestUnitCategory"
+    :include-unit="interestUnitCurrent"
+    selection-mode="single"
+    @selected="resolveInterestUnitSelection"
+    @cancelled="cancelInterestUnitSelection"
+  />
   <LostReasonModal
     v-if="showLostReasonModal"
     v-model="showLostReasonModal"
@@ -504,6 +513,7 @@ import SidePanelLayout from '@/components/SidePanelLayout.vue'
 import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
+import UnitSelectionDialog from '@/components/Modals/UnitSelectionDialog.vue'
 import LeadProgressGraph from '@/components/LeadProgressGraph.vue'
 import LeadSmartEvents from '@/components/LeadSmartEvents.vue'
 import LeadInterestGroups from '@/components/LeadInterestGroups.vue'
@@ -558,6 +568,10 @@ const errorMessage = ref('')
 const showDeleteLinkedDocModal = ref(false)
 const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
+const showInterestUnitPicker = ref(false)
+const interestUnitCategory = ref('Resale')
+const interestUnitCurrent = ref('')
+const interestUnitResolver = ref(null)
 
 const { triggerOnRender, assignees, permissions, document, scripts, error } =
   useDocument('CRM Lead', props.leadId)
@@ -1595,6 +1609,145 @@ async function completeInterestAction(action) {
 // ---------------------------------------------------------------------------
 // 4. Interest Determination Dialog
 // ---------------------------------------------------------------------------
+function selectInterestUnit(category, currentUnit = '') {
+  if (interestUnitResolver.value) interestUnitResolver.value(null)
+  interestUnitCategory.value = category
+  interestUnitCurrent.value = currentUnit || ''
+  showInterestUnitPicker.value = true
+  return new Promise((resolve) => {
+    interestUnitResolver.value = resolve
+  })
+}
+
+function resolveInterestUnitSelection(unit) {
+  const resolve = interestUnitResolver.value
+  interestUnitResolver.value = null
+  if (resolve) resolve(unit || null)
+}
+
+function cancelInterestUnitSelection() {
+  const resolve = interestUnitResolver.value
+  interestUnitResolver.value = null
+  if (resolve) resolve(null)
+}
+
+async function chooseInterestCategory(defaults = {}) {
+  return renderFieldLayoutDialog({
+    title: defaults.editing ? __('Edit Interest') : __('Add Interest'),
+    defaults: {
+      interest_category: defaults.interest_category || '',
+      unit_interest_status: defaults.unit_interest_status || 'Active',
+    },
+    fields: [
+      {
+        fieldname: 'interest_category',
+        fieldtype: 'Select',
+        label: __('Interest Category'),
+        options: '\nResale\nPrimary\nBrokerage Request\nInternational',
+        reqd: 1,
+      },
+      ...(defaults.editing
+        ? [
+            {
+              fieldname: 'unit_interest_status',
+              fieldtype: 'Select',
+              label: __('Interest Status'),
+              options: '\nActive\nLost Interest',
+              reqd: 1,
+            },
+          ]
+        : []),
+    ],
+    submitLabel: __('Continue'),
+  })
+}
+
+function requestInterestFields(category, { editing = false } = {}) {
+  const requestFields = [
+    {
+      fieldname: 'preferred_area',
+      fieldtype: 'Data',
+      label: __('Preferred Location / Area'),
+    },
+    {
+      fieldname: 'preferred_unit_type',
+      fieldtype: 'Select',
+      label: __('Preferred Unit Type'),
+      options:
+        '\nApartment\nDuplex\nTownhouse\nVilla\nChalet\nStudio\nPenthouse',
+    },
+    {
+      fieldname: 'buyer_budget',
+      fieldtype: 'Currency',
+      label: __('Maximum Budget'),
+    },
+  ]
+  if (category === 'Brokerage Request') {
+    return [
+      {
+        fieldname: 'request_notes',
+        fieldtype: 'Small Text',
+        label: __('Brokerage Requirements'),
+        reqd: 1,
+      },
+      ...(editing
+        ? [
+            {
+              fieldname: 'request_status',
+              fieldtype: 'Select',
+              label: __('Request Status'),
+              options: '\nOpen\nFulfilled\nCancelled',
+              reqd: 1,
+            },
+          ]
+        : []),
+      ...requestFields,
+    ]
+  }
+  return [
+    {
+      fieldname: 'international_type',
+      fieldtype: 'Select',
+      label: __('International Category'),
+      options: '\nStocks\nCharity Work\nReal Estate',
+      reqd: 1,
+    },
+    {
+      fieldname: 'international_country',
+      fieldtype: 'Link',
+      label: __('Country'),
+      options: 'Country',
+      reqd: 1,
+    },
+    {
+      fieldname: 'international_details',
+      fieldtype: 'Small Text',
+      label: __('International Request Details'),
+    },
+    ...requestFields.map((field) => ({
+      ...field,
+      depends_on: "eval:doc.international_type=='Real Estate'",
+    })),
+  ]
+}
+
+async function collectRequestInterest(
+  category,
+  defaults = {},
+  { editing = false } = {},
+) {
+  return renderFieldLayoutDialog({
+    title:
+      category === 'International'
+        ? __('International Request')
+        : __('Brokerage Request'),
+    size: 'lg',
+    defaults,
+    fields: requestInterestFields(category, { editing }),
+    submitLabel: __('Save Interest'),
+  })
+}
+
 async function openInterestDeterminationDialog() {
   const existingInterests = visibleLinkedPropertyRows.value.filter(
     (row) => row.interest_row_name,
@@ -1619,81 +1772,23 @@ async function openInterestDeterminationDialog() {
     }
   }
 
-  const interestValues = await renderFieldLayoutDialog({
-    title: __('Add Interest'),
-    size: 'xl',
-    fields: [
-      {
-        fieldname: 'interest_category',
-        fieldtype: 'Select',
-        label: __('Interest Category'),
-        options: '\nResale\nPrimary\nBrokerage Request\nInternational',
-        reqd: 1,
-      },
-      {
-        fieldname: 'unit',
-        fieldtype: 'Link',
-        label: __('Available Unit'),
-        options: 'Real Estate Unit',
-        depends_on: "eval:['Resale','Primary'].includes(doc.interest_category)",
-        mandatory_depends_on:
-          "eval:['Resale','Primary'].includes(doc.interest_category)",
-        get_query: () => ({ filters: { status: 'Available' } }),
-      },
-      {
-        fieldname: 'request_notes',
-        fieldtype: 'Small Text',
-        label: __('Brokerage Requirements'),
-        depends_on: "eval:doc.interest_category=='Brokerage Request'",
-        mandatory_depends_on: "eval:doc.interest_category=='Brokerage Request'",
-      },
-      {
-        fieldname: 'international_type',
-        fieldtype: 'Select',
-        label: __('International Category'),
-        options: '\nStocks\nCharity Work\nReal Estate',
-        depends_on: "eval:doc.interest_category=='International'",
-        mandatory_depends_on: "eval:doc.interest_category=='International'",
-      },
-      {
-        fieldname: 'international_country',
-        fieldtype: 'Link',
-        label: __('Country'),
-        options: 'Country',
-        depends_on: "eval:doc.interest_category=='International'",
-        mandatory_depends_on: "eval:doc.interest_category=='International'",
-      },
-      {
-        fieldname: 'international_details',
-        fieldtype: 'Small Text',
-        label: __('International Request Details'),
-        depends_on: "eval:doc.interest_category=='International'",
-      },
-      {
-        fieldname: 'preferred_area',
-        fieldtype: 'Data',
-        label: __('Preferred Location / Area'),
-      },
-      {
-        fieldname: 'preferred_unit_type',
-        fieldtype: 'Select',
-        label: __('Unit Type'),
-        options:
-          '\nApartment\nDuplex\nTownhouse\nVilla\nChalet\nStudio\nPenthouse',
-      },
-      {
-        fieldname: 'buyer_budget',
-        fieldtype: 'Currency',
-        label: __('Budget'),
-      },
-    ],
-    submitLabel: __('Save Interest'),
-  })
-  if (!interestValues?.interest_category) return null
+  const categoryValues = await chooseInterestCategory()
+  const category = categoryValues?.interest_category
+  if (!category) return null
+
+  let interestValues = {}
+  if (['Resale', 'Primary'].includes(category)) {
+    const selectedUnit = await selectInterestUnit(category)
+    if (!selectedUnit) return null
+    interestValues.unit = selectedUnit.name
+  } else {
+    interestValues = await collectRequestInterest(category)
+    if (!interestValues) return null
+  }
 
   try {
     const interestData = {
-      interest_category: interestValues.interest_category,
+      interest_category: category,
       units: interestValues.unit ? [interestValues.unit] : [],
       request_notes: interestValues.request_notes || null,
       international_type: interestValues.international_type || null,
@@ -1708,14 +1803,17 @@ async function openInterestDeterminationDialog() {
       {
         lead: props.leadId,
         interested: 1,
-        is_primary_buyer:
-          interestValues.interest_category === 'Primary' ? 1 : 0,
+        is_primary_buyer: category === 'Primary' ? 1 : 0,
         interest_data: JSON.stringify(interestData),
       },
     )
     updateLeadActionState(result)
     reloadActionWeb()
-    toast.success(__('Interest added successfully.'))
+    toast.success(
+      ['Resale', 'Primary'].includes(category)
+        ? __('Selected property added to the lead interests.')
+        : __('Interest request added successfully.'),
+    )
     return 'Added'
   } catch (err) {
     toast.error(
@@ -1793,84 +1891,42 @@ async function openExistingInterestEditor() {
 }
 
 async function editInterestRecord(row) {
-  const values = await renderFieldLayoutDialog({
-    title: __('Edit Interest Record'),
-    size: 'lg',
-    defaults: {
-      interest_category: row.interest_category,
-      unit: row.interest_record_type === 'Inventory Unit' ? row.name : null,
-      request_notes: row.request_notes,
-      request_status: row.request_status || 'Open',
-      international_type: row.international_type,
-      international_country: row.international_country,
-      international_details: row.international_details,
-      unit_interest_status: row.unit_interest_status || 'Active',
-    },
-    fields: [
-      {
-        fieldname: 'interest_category',
-        fieldtype: 'Select',
-        label: __('Interest Category'),
-        options: '\nResale\nPrimary\nBrokerage Request\nInternational',
-        reqd: 1,
-      },
-      {
-        fieldname: 'unit',
-        fieldtype: 'Link',
-        label: __('Available Unit'),
-        options: 'Real Estate Unit',
-        depends_on: "eval:['Resale','Primary'].includes(doc.interest_category)",
-        mandatory_depends_on:
-          "eval:['Resale','Primary'].includes(doc.interest_category)",
-        get_query: () => ({ filters: { status: 'Available' } }),
-      },
-      {
-        fieldname: 'request_notes',
-        fieldtype: 'Small Text',
-        label: __('Brokerage Requirements'),
-        depends_on: "eval:doc.interest_category=='Brokerage Request'",
-        mandatory_depends_on: "eval:doc.interest_category=='Brokerage Request'",
-      },
-      {
-        fieldname: 'request_status',
-        fieldtype: 'Select',
-        label: __('Request Status'),
-        options: '\nOpen\nFulfilled\nCancelled',
-        depends_on: "eval:doc.interest_category=='Brokerage Request'",
-      },
-      {
-        fieldname: 'international_type',
-        fieldtype: 'Select',
-        label: __('International Category'),
-        options: '\nStocks\nCharity Work\nReal Estate',
-        depends_on: "eval:doc.interest_category=='International'",
-        mandatory_depends_on: "eval:doc.interest_category=='International'",
-      },
-      {
-        fieldname: 'international_country',
-        fieldtype: 'Link',
-        label: __('Country'),
-        options: 'Country',
-        depends_on: "eval:doc.interest_category=='International'",
-        mandatory_depends_on: "eval:doc.interest_category=='International'",
-      },
-      {
-        fieldname: 'international_details',
-        fieldtype: 'Small Text',
-        label: __('International Details'),
-        depends_on: "eval:doc.interest_category=='International'",
-      },
-      {
-        fieldname: 'unit_interest_status',
-        fieldtype: 'Select',
-        label: __('Interest Status'),
-        options: '\nActive\nLost Interest',
-        reqd: 1,
-      },
-    ],
-    submitLabel: __('Save Changes'),
+  const categoryValues = await chooseInterestCategory({
+    editing: true,
+    interest_category: row.interest_category,
+    unit_interest_status: row.unit_interest_status || 'Active',
   })
-  if (!values) return false
+  const category = categoryValues?.interest_category
+  if (!category) return false
+
+  let values = {
+    interest_category: category,
+    unit_interest_status: categoryValues.unit_interest_status || 'Active',
+  }
+  if (['Resale', 'Primary'].includes(category)) {
+    const currentUnit =
+      row.interest_record_type === 'Inventory Unit' ? row.name : ''
+    const selectedUnit = await selectInterestUnit(category, currentUnit)
+    if (!selectedUnit) return false
+    values.unit = selectedUnit.name
+  } else {
+    const requestValues = await collectRequestInterest(
+      category,
+      {
+        request_notes: row.request_notes,
+        request_status: row.request_status || 'Open',
+        international_type: row.international_type,
+        international_country: row.international_country,
+        international_details: row.international_details,
+        preferred_area: doc.value.preferred_area,
+        preferred_unit_type: doc.value.preferred_unit_type,
+        buyer_budget: doc.value.buyer_budget,
+      },
+      { editing: true },
+    )
+    if (!requestValues) return false
+    values = { ...values, ...requestValues }
+  }
 
   try {
     await call('real_estate_crm_customs.api.update_interest_record', {
@@ -1879,7 +1935,13 @@ async function editInterestRecord(row) {
       interest_data: JSON.stringify(values),
     })
     reloadActionWeb()
-    toast.success(__('Interest record updated.'))
+    toast.success(
+      ['Resale', 'Primary'].includes(category)
+        ? __(
+            'Selected property updated. Its details remain linked to inventory.',
+          )
+        : __('Interest request updated.'),
+    )
     return true
   } catch (err) {
     toast.error(

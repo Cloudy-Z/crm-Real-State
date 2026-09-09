@@ -1,140 +1,246 @@
 <template>
   <Dialog v-model="show" :options="{ size: '5xl' }">
     <template #body-title>
-      <h3 class="text-2xl font-semibold leading-6 text-ink-gray-9">
-        {{ __('Select Inventory Units') }}
-      </h3>
-      <p class="mt-1 text-sm text-ink-gray-6">
-        {{
-          __(
-            'Browse available units and select one or more to add to the buyer interest list.',
-          )
-        }}
-      </p>
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <h3 class="text-2xl font-semibold leading-6 text-ink-gray-9">
+            {{ __('Select Property') }}
+          </h3>
+          <span
+            class="rounded-full bg-surface-blue-2 px-2.5 py-1 text-xs font-medium text-ink-blue-3"
+          >
+            {{ __(localCategory) }}
+          </span>
+        </div>
+        <p class="mt-1 text-sm text-ink-gray-6">
+          {{
+            __(
+              'Compare properties by location, project, type, price and finishing. SKU is shown only as a reference.',
+            )
+          }}
+        </p>
+      </div>
     </template>
+
     <template #body-content>
       <div class="flex flex-col gap-4">
-        <div class="rounded bg-surface-gray-1 p-3">
-          <label class="mb-1 block text-xs font-medium text-ink-gray-6">{{
-            __('Interest Category')
-          }}</label>
-          <select
-            v-model="interestCategory"
-            class="h-9 w-full rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 sm:w-64"
-          >
-            <option value="Resale">{{ __('Resale') }}</option>
-            <option value="Primary">{{ __('Primary') }}</option>
-          </select>
-          <p class="mt-1 text-xs text-ink-gray-5">
-            {{
-              interestCategory === 'Resale'
-                ? __('Seller-owned available units')
-                : __('Open developer inventory without a seller owner')
-            }}
+        <div class="rounded-lg bg-surface-gray-1 p-3">
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6 xl:col-span-2"
+            >
+              {{ __('Search') }}
+              <input
+                v-model="filters.search"
+                type="search"
+                :placeholder="__('Project, developer, unit type or reference')"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+                @keyup.enter="fetchUnits"
+              />
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
+              {{ __('Location') }}
+              <input
+                v-model="filters.location"
+                type="text"
+                :placeholder="__('Area or location')"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+                @keyup.enter="fetchUnits"
+              />
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
+              {{ __('Unit Type') }}
+              <select
+                v-model="filters.unitType"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+              >
+                <option value="">{{ __('All Types') }}</option>
+                <option v-for="type in unitTypes" :key="type" :value="type">
+                  {{ __(type) }}
+                </option>
+              </select>
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
+              {{ __('Project') }}
+              <input
+                v-model="filters.project"
+                type="text"
+                :placeholder="__('Project name')"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+                @keyup.enter="fetchUnits"
+              />
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
+              {{ __('Developer') }}
+              <input
+                v-model="filters.developer"
+                type="text"
+                :placeholder="__('Developer name')"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+                @keyup.enter="fetchUnits"
+              />
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
+              {{ __('Minimum Price') }}
+              <input
+                v-model="filters.minPrice"
+                type="number"
+                min="0"
+                :placeholder="__('From')"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+                @keyup.enter="fetchUnits"
+              />
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
+              {{ __('Maximum Price') }}
+              <input
+                v-model="filters.maxPrice"
+                type="number"
+                min="0"
+                :placeholder="__('To')"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+                @keyup.enter="fetchUnits"
+              />
+            </label>
+          </div>
+
+          <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p class="text-xs text-ink-gray-5">
+              {{ categoryHint }}
+            </p>
+            <div class="flex gap-2">
+              <Button
+                :label="__('Clear Filters')"
+                variant="subtle"
+                @click="clearFilters"
+              />
+              <Button
+                :label="__('Apply Filters')"
+                variant="solid"
+                :loading="loading"
+                @click="fetchUnits"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div v-if="loading" class="py-12 text-center text-sm text-ink-gray-6">
+          {{ __('Loading matching properties...') }}
+        </div>
+
+        <div
+          v-else-if="!units.length"
+          class="rounded-lg border border-dashed border-outline-gray-2 px-4 py-12 text-center"
+        >
+          <p class="font-medium text-ink-gray-8">
+            {{ __('No matching available properties') }}
+          </p>
+          <p class="mt-1 text-sm text-ink-gray-5">
+            {{ __('Clear one or more filters and search again.') }}
           </p>
         </div>
-        <!-- Search / Filter -->
-        <div class="flex flex-wrap gap-2">
-          <input
-            v-model="searchQuery"
-            type="text"
-            :placeholder="__('Search by SKU, project, developer...')"
-            class="flex-1 rounded border border-outline-gray-2 px-3 py-2 text-sm focus:border-surface-gray-4 focus:outline-none"
-          />
-          <Button :label="__('Refresh')" variant="subtle" @click="fetchUnits" />
-        </div>
-        <!-- Loading state -->
-        <div v-if="loading" class="py-8 text-center text-sm text-ink-gray-6">
-          {{ __('Loading available units...') }}
-        </div>
-        <!-- Empty state -->
-        <div
-          v-else-if="!filteredUnits.length"
-          class="py-8 text-center text-sm text-ink-gray-6"
-        >
-          {{ __('No available inventory units found matching your search.') }}
-        </div>
-        <!-- Units table -->
+
         <div
           v-else
-          class="max-h-[400px] overflow-auto rounded border border-outline-gray-1"
+          class="grid max-h-[460px] grid-cols-1 gap-3 overflow-auto pr-1 lg:grid-cols-2"
         >
-          <table class="w-full text-left text-sm">
-            <thead
-              class="sticky top-0 border-b bg-surface-gray-1 text-ink-gray-6"
-            >
-              <tr>
-                <th class="px-3 py-2.5 font-medium">
-                  <input
-                    type="checkbox"
-                    :checked="allSelected"
-                    :indeterminate="someSelected && !allSelected"
-                    @change="toggleAll"
-                  />
-                </th>
-                <th class="px-3 py-2.5 font-medium">{{ __('SKU') }}</th>
-                <th class="px-3 py-2.5 font-medium">{{ __('Project') }}</th>
-                <th class="px-3 py-2.5 font-medium">{{ __('Developer') }}</th>
-                <th class="px-3 py-2.5 font-medium">{{ __('Type') }}</th>
-                <th class="px-3 py-2.5 font-medium">{{ __('Floor') }}</th>
-                <th class="px-3 py-2.5 font-medium">{{ __('Finishing') }}</th>
-                <th class="px-3 py-2.5 font-medium">{{ __('Price') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="unit in filteredUnits"
-                :key="unit.name"
-                class="cursor-pointer border-b last:border-b-0 hover:bg-surface-gray-1"
-                :class="{ 'bg-surface-blue-1': isSelected(unit) }"
-                @click="toggleUnit(unit)"
-              >
-                <td class="px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    :checked="isSelected(unit)"
-                    @click.stop
-                    @change="toggleUnit(unit)"
-                  />
-                </td>
-                <td class="px-3 py-2.5 font-medium text-ink-gray-9">
-                  {{ unit.sku || unit.name }}
-                </td>
-                <td class="px-3 py-2.5 text-ink-gray-8">
-                  {{ unit.project || '—' }}
-                </td>
-                <td class="px-3 py-2.5 text-ink-gray-8">
-                  {{ unit.developer || '—' }}
-                </td>
-                <td class="px-3 py-2.5 text-ink-gray-8">
-                  {{ unit.unit_type || '—' }}
-                </td>
-                <td class="px-3 py-2.5 text-ink-gray-8">
-                  {{ unit.floor || '—' }}
-                </td>
-                <td class="px-3 py-2.5 text-ink-gray-8">
-                  {{ unit.finishing_type || '—' }}
-                </td>
-                <td class="px-3 py-2.5 text-ink-gray-8">
+          <button
+            v-for="unit in units"
+            :key="unit.name"
+            type="button"
+            class="rounded-xl border p-4 text-left transition duration-150 hover:border-outline-gray-4 hover:bg-surface-gray-1 active:scale-[0.99]"
+            :class="
+              isSelected(unit)
+                ? 'border-outline-blue-2 bg-surface-blue-1 ring-1 ring-outline-blue-1'
+                : 'border-outline-gray-2 bg-surface-white'
+            "
+            @click="toggleUnit(unit)"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="truncate text-base font-semibold text-ink-gray-9">
+                  {{ unit.location || __('Location not set') }}
+                </p>
+                <p class="mt-0.5 truncate text-sm font-medium text-ink-gray-7">
+                  {{
+                    unit.project_label || unit.project || __('Project not set')
+                  }}
+                </p>
+              </div>
+              <div class="shrink-0 text-right">
+                <p class="text-base font-semibold text-ink-gray-9">
                   {{ formatPrice(unit.price) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </p>
+                <p class="text-xs text-ink-gray-5">{{ __('Asking price') }}</p>
+              </div>
+            </div>
+
+            <div
+              class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-surface-gray-1 p-3 text-sm"
+            >
+              <UnitFact :label="__('Unit Type')" :value="unit.unit_type" />
+              <UnitFact :label="__('Developer')" :value="unit.developer" />
+              <UnitFact :label="__('Finishing')" :value="unit.finishing_type" />
+              <UnitFact
+                :label="__('Floor')"
+                :value="displayFloor(unit.floor)"
+              />
+              <UnitFact
+                :label="__('Project Status')"
+                :value="unit.project_status"
+              />
+              <UnitFact :label="__('Availability')" :value="unit.status" />
+            </div>
+
+            <div class="mt-3 flex items-center justify-between gap-3">
+              <span class="text-xs text-ink-gray-5">
+                {{ __('Reference') }}: {{ unit.sku || unit.name }}
+              </span>
+              <span
+                class="rounded-full px-2 py-1 text-xs font-medium"
+                :class="
+                  isSelected(unit)
+                    ? 'bg-surface-blue-3 text-ink-white'
+                    : 'bg-surface-gray-2 text-ink-gray-7'
+                "
+              >
+                {{ isSelected(unit) ? __('Selected') : __('Select') }}
+              </span>
+            </div>
+          </button>
         </div>
-        <!-- Selection summary and action -->
-        <div class="flex items-center justify-between">
+
+        <div
+          class="flex flex-wrap items-center justify-between gap-3 border-t pt-4"
+        >
           <div class="text-sm text-ink-gray-6">
-            {{ selectedUnits.length }} {{ __('unit(s) selected') }}
+            {{ units.length }} {{ __('matching property(s)') }} ·
+            {{ selectedUnits.length }} {{ __('selected') }}
           </div>
           <div class="flex gap-2">
             <Button
               :label="__('Cancel')"
               variant="subtle"
-              @click="show = false"
+              @click="closeDialog"
             />
             <Button
-              :label="__('Add Selected Units')"
+              :label="
+                selectionMode === 'single'
+                  ? __('Use Selected Property')
+                  : __('Add Selected Properties')
+              "
               variant="solid"
               :disabled="!selectedUnits.length"
               :loading="submitting"
@@ -148,74 +254,103 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { Dialog, call } from 'frappe-ui'
+import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
+import { Button, Dialog, call, toast } from 'frappe-ui'
 
-// __ is globally available via window.__ (set by translation plugin)
+const UnitFact = defineComponent({
+  props: {
+    label: { type: String, required: true },
+    value: { type: [String, Number], default: null },
+  },
+  setup(props) {
+    return () =>
+      h('div', { class: 'min-w-0' }, [
+        h('p', { class: 'text-xs text-ink-gray-5' }, props.label),
+        h(
+          'p',
+          { class: 'mt-0.5 truncate font-medium text-ink-gray-8' },
+          props.value === null ||
+            props.value === undefined ||
+            props.value === ''
+            ? '—'
+            : String(props.value),
+        ),
+      ])
+  },
+})
 
 const props = defineProps({
   leadId: { type: String, required: true },
+  interestCategory: { type: String, default: 'Resale' },
+  includeUnit: { type: String, default: '' },
+  selectionMode: {
+    type: String,
+    default: 'single',
+    validator: (value) => ['single', 'multiple'].includes(value),
+  },
+  linkOnSubmit: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['units-added'])
-
+const emit = defineEmits(['selected', 'units-added', 'cancelled'])
 const show = defineModel({ type: Boolean, default: false })
 const loading = ref(false)
 const submitting = ref(false)
 const units = ref([])
 const selectedUnits = ref([])
-const searchQuery = ref('')
-const interestCategory = ref('Resale')
-
-const filteredUnits = computed(() => {
-  const eligibleUnits = units.value.filter((unit) =>
-    interestCategory.value === 'Resale'
-      ? Boolean(unit.owner_lead)
-      : !unit.owner_lead,
-  )
-  if (!searchQuery.value.trim()) return eligibleUnits
-  const q = searchQuery.value.toLowerCase()
-  return eligibleUnits.filter(
-    (u) =>
-      (u.sku || '').toLowerCase().includes(q) ||
-      (u.project || '').toLowerCase().includes(q) ||
-      (u.developer || '').toLowerCase().includes(q) ||
-      (u.unit_type || '').toLowerCase().includes(q) ||
-      (u.name || '').toLowerCase().includes(q),
-  )
+const localCategory = ref(props.interestCategory)
+const selectionCommitted = ref(false)
+const unitTypes = ['Villa', 'Chalet', 'Apartment', 'Duplex', 'Penthouse']
+const filters = reactive({
+  search: '',
+  location: '',
+  project: '',
+  developer: '',
+  unitType: '',
+  minPrice: '',
+  maxPrice: '',
 })
 
-const allSelected = computed(
-  () =>
-    filteredUnits.value.length > 0 &&
-    selectedUnits.value.length === filteredUnits.value.length,
+const categoryHint = computed(() =>
+  localCategory.value === 'Resale'
+    ? __('Showing seller-owned resale inventory only.')
+    : __('Showing open developer inventory without a seller owner only.'),
 )
-const someSelected = computed(() => selectedUnits.value.length > 0)
 
 function isSelected(unit) {
   return selectedUnits.value.includes(unit.name)
 }
 
 function toggleUnit(unit) {
-  const idx = selectedUnits.value.indexOf(unit.name)
-  if (idx >= 0) {
-    selectedUnits.value.splice(idx, 1)
-  } else {
-    selectedUnits.value.push(unit.name)
+  if (props.selectionMode === 'single') {
+    selectedUnits.value = [unit.name]
+    return
   }
-}
-
-function toggleAll() {
-  if (allSelected.value) {
-    selectedUnits.value = []
-  } else {
-    selectedUnits.value = filteredUnits.value.map((u) => u.name)
-  }
+  const index = selectedUnits.value.indexOf(unit.name)
+  if (index >= 0) selectedUnits.value.splice(index, 1)
+  else selectedUnits.value.push(unit.name)
 }
 
 function formatPrice(value) {
   if (value === null || value === undefined || value === '') return '—'
   return Number(value).toLocaleString()
+}
+
+function displayFloor(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  return String(value)
+}
+
+function clearFilters() {
+  Object.assign(filters, {
+    search: '',
+    location: '',
+    project: '',
+    developer: '',
+    unitType: '',
+    minPrice: '',
+    maxPrice: '',
+  })
+  fetchUnits()
 }
 
 async function fetchUnits() {
@@ -225,11 +360,35 @@ async function fetchUnits() {
       'real_estate_crm_customs.api.get_available_units_for_selection',
       {
         lead: props.leadId,
+        interest_category: localCategory.value,
+        search: filters.search || null,
+        location: filters.location || null,
+        project: filters.project || null,
+        developer: filters.developer || null,
+        unit_type: filters.unitType || null,
+        min_price: filters.minPrice || null,
+        max_price: filters.maxPrice || null,
+        include_unit: props.includeUnit || null,
       },
     )
     units.value = result || []
-  } catch {
+    selectedUnits.value = selectedUnits.value.filter((name) =>
+      units.value.some((unit) => unit.name === name),
+    )
+    if (
+      props.selectionMode === 'single' &&
+      props.includeUnit &&
+      units.value.some((unit) => unit.name === props.includeUnit)
+    ) {
+      selectedUnits.value = [props.includeUnit]
+    }
+  } catch (error) {
     units.value = []
+    toast.error(
+      error.messages?.[0] ||
+        error.message ||
+        __('Could not load matching properties.'),
+    )
   } finally {
     loading.value = false
   }
@@ -239,32 +398,49 @@ async function submitSelection() {
   if (!selectedUnits.value.length) return
   submitting.value = true
   try {
-    await call('real_estate_crm_customs.api.link_interested_units', {
-      lead: props.leadId,
-      units: JSON.stringify(selectedUnits.value),
-      interest_category: interestCategory.value,
-    })
-    emit('units-added')
+    const selectedRecords = units.value.filter((unit) =>
+      selectedUnits.value.includes(unit.name),
+    )
+    if (props.linkOnSubmit) {
+      await call('real_estate_crm_customs.api.link_interested_units', {
+        lead: props.leadId,
+        units: JSON.stringify(selectedUnits.value),
+        interest_category: localCategory.value,
+      })
+      emit('units-added', selectedRecords)
+    } else {
+      emit(
+        'selected',
+        props.selectionMode === 'single' ? selectedRecords[0] : selectedRecords,
+      )
+    }
+    selectionCommitted.value = true
     show.value = false
-    selectedUnits.value = []
-  } catch {
-    // Error handled by caller via toast
   } finally {
     submitting.value = false
   }
 }
 
-watch(interestCategory, () => {
-  selectedUnits.value = []
-})
+function closeDialog() {
+  show.value = false
+}
 
-// Fetch units when dialog opens
-watch(show, (val) => {
-  if (val) {
+watch(
+  () => props.interestCategory,
+  (value) => {
+    localCategory.value = value || 'Resale'
     selectedUnits.value = []
-    searchQuery.value = ''
-    interestCategory.value = 'Resale'
-    fetchUnits()
+    if (show.value) fetchUnits()
+  },
+)
+
+watch(show, (value, previous) => {
+  if (value) {
+    selectionCommitted.value = false
+    selectedUnits.value = props.includeUnit ? [props.includeUnit] : []
+    clearFilters()
+    return
   }
+  if (previous && !selectionCommitted.value) emit('cancelled')
 })
 </script>
