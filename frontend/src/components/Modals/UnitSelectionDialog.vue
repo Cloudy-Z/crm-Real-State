@@ -24,6 +24,48 @@
 
     <template #body-content>
       <div class="flex flex-col gap-4">
+        <div
+          class="rounded-xl border border-outline-blue-1 bg-surface-blue-1 p-4"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <span
+                  class="rounded-full bg-surface-blue-3 px-2.5 py-1 text-xs font-semibold text-ink-white"
+                >
+                  {{ __('Smart Match') }}
+                </span>
+                <span class="text-xs text-ink-gray-6">
+                  {{ matchProfile.source || __('Lead Preferences') }}
+                </span>
+              </div>
+              <p class="mt-2 text-sm font-medium text-ink-gray-8">
+                {{
+                  smartMatchActive
+                    ? __(
+                        'Closest properties are ranked first. A difference lowers the score but does not hide the property.',
+                      )
+                    : __(
+                        'No saved property preferences were found. Add or adjust criteria below to create a ranked match.',
+                      )
+                }}
+              </p>
+            </div>
+            <span class="text-xs font-medium text-ink-gray-6">
+              {{ matchCriteria.length }} {{ __('active criteria') }}
+            </span>
+          </div>
+          <div v-if="matchCriteria.length" class="mt-3 flex flex-wrap gap-2">
+            <span
+              v-for="criterion in matchCriteria"
+              :key="criterion.label"
+              class="rounded-full border border-outline-blue-1 bg-surface-white px-2.5 py-1 text-xs text-ink-gray-7"
+            >
+              {{ criterion.label }}: {{ criterion.value }}
+            </span>
+          </div>
+        </div>
+
         <div class="rounded-lg bg-surface-gray-1 p-3">
           <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <label
@@ -116,18 +158,37 @@
             </label>
           </div>
 
-          <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
-            <p class="text-xs text-ink-gray-5">
-              {{ categoryHint }}
-            </p>
+          <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-xs text-ink-gray-5">
+                {{ categoryHint }}
+              </p>
+              <label
+                class="mt-2 flex cursor-pointer items-center gap-2 text-xs font-medium text-ink-gray-7"
+              >
+                <input v-model="strictFilters" type="checkbox" />
+                {{ __('Exact filters only') }}
+              </label>
+              <p class="mt-1 text-xs text-ink-gray-5">
+                {{
+                  strictFilters
+                    ? __(
+                        'Only properties that pass every filter will be shown.',
+                      )
+                    : __(
+                        'Criteria change ranking; near alternatives stay visible.',
+                      )
+                }}
+              </p>
+            </div>
             <div class="flex gap-2">
               <Button
-                :label="__('Clear Filters')"
+                :label="__('Reset to Lead Requirements')"
                 variant="subtle"
-                @click="clearFilters"
+                @click="resetToLeadProfile"
               />
               <Button
-                :label="__('Apply Filters')"
+                :label="__('Update Matches')"
                 variant="solid"
                 :loading="loading"
                 @click="fetchUnits"
@@ -180,7 +241,16 @@
                 </p>
               </div>
               <div class="shrink-0 text-right">
-                <p class="text-base font-semibold text-ink-gray-9">
+                <span
+                  v-if="
+                    unit.match_score !== null && unit.match_score !== undefined
+                  "
+                  class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
+                  :class="matchScoreClass(unit.match_score)"
+                >
+                  {{ unit.match_score }}% {{ __(unit.match_level) }}
+                </span>
+                <p class="mt-1 text-base font-semibold text-ink-gray-9">
                   {{ formatPrice(unit.price) }}
                 </p>
                 <p class="text-xs text-ink-gray-5">{{ __('Asking price') }}</p>
@@ -202,6 +272,26 @@
                 :value="unit.project_status"
               />
               <UnitFact :label="__('Availability')" :value="unit.status" />
+            </div>
+
+            <div
+              v-if="unit.match_reasons?.length || unit.match_gaps?.length"
+              class="mt-3 flex flex-wrap gap-1.5"
+            >
+              <span
+                v-for="reason in unit.match_reasons"
+                :key="`reason-${reason}`"
+                class="rounded-full bg-surface-green-1 px-2 py-1 text-xs text-ink-green-3"
+              >
+                {{ reason }}
+              </span>
+              <span
+                v-for="gap in unit.match_gaps"
+                :key="`gap-${gap}`"
+                class="rounded-full bg-surface-amber-1 px-2 py-1 text-xs text-ink-amber-3"
+              >
+                {{ gap }}
+              </span>
             </div>
 
             <div class="mt-3 flex items-center justify-between gap-3">
@@ -226,7 +316,8 @@
           class="flex flex-wrap items-center justify-between gap-3 border-t pt-4"
         >
           <div class="text-sm text-ink-gray-6">
-            {{ units.length }} {{ __('matching property(s)') }} ·
+            {{ units.length }}
+            {{ __('eligible property(s), ranked by proximity') }} ·
             {{ selectedUnits.length }} {{ __('selected') }}
           </div>
           <div class="flex gap-2">
@@ -299,6 +390,9 @@ const units = ref([])
 const selectedUnits = ref([])
 const localCategory = ref(props.interestCategory)
 const selectionCommitted = ref(false)
+const matchProfile = ref({})
+const smartMatchActive = ref(false)
+const strictFilters = ref(false)
 const unitTypes = ['Villa', 'Chalet', 'Apartment', 'Duplex', 'Penthouse']
 const filters = reactive({
   search: '',
@@ -315,6 +409,25 @@ const categoryHint = computed(() =>
     ? __('Showing seller-owned resale inventory only.')
     : __('Showing open developer inventory without a seller owner only.'),
 )
+
+const matchCriteria = computed(() => {
+  const profile = matchProfile.value || {}
+  return [
+    { label: __('Location'), value: profile.location },
+    { label: __('Project'), value: profile.project },
+    { label: __('Developer'), value: profile.developer },
+    { label: __('Unit Type'), value: profile.unit_type },
+    { label: __('Finishing'), value: profile.finishing_type },
+    {
+      label: __('Minimum Price'),
+      value: profile.budget_min ? formatPrice(profile.budget_min) : null,
+    },
+    {
+      label: __('Maximum Budget'),
+      value: profile.budget ? formatPrice(profile.budget) : null,
+    },
+  ].filter((criterion) => criterion.value !== null && criterion.value !== '')
+})
 
 function isSelected(unit) {
   return selectedUnits.value.includes(unit.name)
@@ -340,7 +453,14 @@ function displayFloor(value) {
   return String(value)
 }
 
-function clearFilters() {
+function matchScoreClass(score) {
+  if (score >= 85) return 'bg-surface-green-2 text-ink-green-3'
+  if (score >= 65) return 'bg-surface-blue-2 text-ink-blue-3'
+  if (score >= 40) return 'bg-surface-amber-1 text-ink-amber-3'
+  return 'bg-surface-gray-2 text-ink-gray-7'
+}
+
+function clearFilterValues() {
   Object.assign(filters, {
     search: '',
     location: '',
@@ -350,14 +470,28 @@ function clearFilters() {
     minPrice: '',
     maxPrice: '',
   })
-  fetchUnits()
 }
 
-async function fetchUnits() {
+function applyProfileToFilters(profile) {
+  filters.location = profile.location || ''
+  filters.project = profile.project || ''
+  filters.developer = profile.developer || ''
+  filters.unitType = profile.unit_type || ''
+  filters.minPrice = profile.budget_min || ''
+  filters.maxPrice = profile.budget || ''
+}
+
+async function resetToLeadProfile() {
+  clearFilterValues()
+  strictFilters.value = false
+  await fetchUnits({ hydrateProfile: true })
+}
+
+async function fetchUnits({ hydrateProfile = false } = {}) {
   loading.value = true
   try {
     const result = await call(
-      'real_estate_crm_customs.api.get_available_units_for_selection',
+      'real_estate_crm_customs.api.get_smart_matched_units',
       {
         lead: props.leadId,
         interest_category: localCategory.value,
@@ -369,9 +503,13 @@ async function fetchUnits() {
         min_price: filters.minPrice || null,
         max_price: filters.maxPrice || null,
         include_unit: props.includeUnit || null,
+        strict_filters: strictFilters.value ? 1 : 0,
       },
     )
-    units.value = result || []
+    units.value = result?.units || []
+    matchProfile.value = result?.profile || {}
+    smartMatchActive.value = Boolean(result?.smart_match_active)
+    if (hydrateProfile) applyProfileToFilters(matchProfile.value)
     selectedUnits.value = selectedUnits.value.filter((name) =>
       units.value.some((unit) => unit.name === name),
     )
@@ -430,7 +568,7 @@ watch(
   (value) => {
     localCategory.value = value || 'Resale'
     selectedUnits.value = []
-    if (show.value) fetchUnits()
+    if (show.value) resetToLeadProfile()
   },
 )
 
@@ -438,7 +576,7 @@ watch(show, (value, previous) => {
   if (value) {
     selectionCommitted.value = false
     selectedUnits.value = props.includeUnit ? [props.includeUnit] : []
-    clearFilters()
+    resetToLeadProfile()
     return
   }
   if (previous && !selectionCommitted.value) emit('cancelled')
