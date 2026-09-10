@@ -938,7 +938,7 @@ function executePhoneCall() {
     makeCall(fullPhone)
     return
   }
-  window.open(`tel:${fullPhone}`, '_self')
+  window.location.assign(`tel:${fullPhone}`)
 }
 
 // ---------------------------------------------------------------------------
@@ -950,11 +950,7 @@ async function startDynamicAction(action) {
       lead: props.leadId,
       action_name: action.name,
     })
-    if (action.action_type === 'Call') executePhoneCall()
-    reloadActionWeb()
-    if (action.action_type !== 'Call') {
-      toast.success(__('Action is ready. Record its result now.'))
-    }
+    await actionContext.reload()
     return result?.action || action
   } catch (err) {
     toast.error(
@@ -970,7 +966,10 @@ async function executeDynamicAction(action) {
     : action
   if (!activeAction) return
   if (activeAction.action_type === 'Call') {
-    if (action.workflow_status === 'In Progress') executePhoneCall()
+    executePhoneCall()
+    toast.success(
+      __('Call started. Return to this Lead and select Record Call result.'),
+    )
     return
   }
   await openCallLogDialog(activeAction)
@@ -2055,15 +2054,18 @@ async function openNextActionDialog(
       notes: actionPlan.notes,
       unit: actionPlan.unit,
       interest_rows: JSON.stringify(actionPlan.interest_rows || []),
+      execute_now: actionPlan.execute_now ? 1 : 0,
     })
-    reloadActionWeb()
+    await actionContext.reload()
     if (actionPlan.execute_now) {
       await executeDynamicAction(result?.action)
     } else {
+      await smartEvents.value?.reload?.()
+      activities.value?.all_activities?.reload?.()
       toast.success(
-        __(
-          'Workflow action scheduled. It is now the lead’s required next action.',
-        ),
+        result?.event
+          ? __('Action scheduled and added to Events: {0}', [result.event])
+          : __('Workflow action scheduled and added to the Lead calendar.'),
       )
     }
   } catch (err) {
