@@ -1038,6 +1038,7 @@ async function openCallLogDialog(action = null) {
   const rawValues = await collectActionResult(currentAction)
   if (!rawValues) return
   const values = normalizeActionResult(currentAction, rawValues)
+  if (!values) return
 
   if (actionNeedsNextAction(currentAction, values)) {
     const nextAction = await collectNextAction(currentAction, values)
@@ -1323,6 +1324,12 @@ function interestSelectionFields(action, { label, requiredFor = null }) {
 }
 
 function normalizeActionResult(action, values) {
+  if (!action?.action_type) {
+    toast.error(
+      __('The current action could not be loaded. Refresh the Lead and retry.'),
+    )
+    return null
+  }
   const result = { ...values }
   if (action.action_type === 'Send Offer') result.outcome = 'Dispatched'
   const rows = scopedInterestRows(action)
@@ -1345,7 +1352,10 @@ async function collectNextAction(action, values) {
     return null
   }
 
-  const options = definitions.map(actionOptionLabel)
+  const validDefinitions = definitions.filter(
+    (definition) => definition?.action_type,
+  )
+  const options = validDefinitions.map(actionOptionLabel)
   const selector = await renderFieldLayoutDialog({
     title: __('Required Next Action'),
     fields: [
@@ -1360,7 +1370,11 @@ async function collectNextAction(action, values) {
     submitLabel: __('Continue'),
   })
   if (!selector?.selection) return null
-  const definition = definitions[options.indexOf(selector.selection)]
+  const definition = validDefinitions[options.indexOf(selector.selection)]
+  if (!definition) {
+    toast.error(__('The selected next action is no longer available.'))
+    return null
+  }
   return collectActionPlan(definition, action, values)
 }
 
@@ -1495,10 +1509,29 @@ function derivePolicyActions(rows) {
 }
 
 function actionOptionLabel(definition) {
-  return `${definition.action_type} — ${definition.purpose}`
+  if (!definition?.action_type) return ''
+  return `${definition.action_type} — ${definition.purpose || ''}`
+}
+
+function normalizeActionPlanValues(rows, values) {
+  const result = { ...values }
+  const selectedRows = rows
+    .filter((_row, index) => Boolean(values[`interest_row_${index}`]))
+    .map((row) => row.name)
+  Object.keys(result)
+    .filter((fieldname) => fieldname.startsWith('interest_row_'))
+    .forEach((fieldname) => delete result[fieldname])
+  if (selectedRows.length) result.interest_rows = selectedRows
+  return result
 }
 
 async function collectActionPlan(definition, { forceImmediate = false } = {}) {
+  if (!definition?.action_type) {
+    toast.error(
+      __('The selected action is no longer available. Refresh and try again.'),
+    )
+    return null
+  }
   const alwaysImmediate = definition.action_type === 'Add Interest'
   const requiresRows =
     definition.requires_interest_rows || definition.action_type === 'Showing'
@@ -1569,7 +1602,7 @@ async function collectActionPlan(definition, { forceImmediate = false } = {}) {
   })
   if (!values) return null
 
-  const normalized = normalizeActionResult(planScope, values)
+  const normalized = normalizeActionPlanValues(planRows, values)
   const executeNow =
     forceImmediate ||
     alwaysImmediate ||
