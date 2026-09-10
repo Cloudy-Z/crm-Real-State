@@ -84,13 +84,19 @@
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
             >
               {{ __('Location') }}
-              <input
+              <select
                 v-model="filters.location"
-                type="text"
-                :placeholder="__('Area or location')"
                 class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
-                @keyup.enter="fetchUnits"
-              />
+              >
+                <option value="">{{ __('All Locations') }}</option>
+                <option
+                  v-for="location in filterOptions.locations"
+                  :key="location"
+                  :value="location"
+                >
+                  {{ location }}
+                </option>
+              </select>
             </label>
             <label
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
@@ -101,34 +107,44 @@
                 class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
               >
                 <option value="">{{ __('All Types') }}</option>
-                <option v-for="type in unitTypes" :key="type" :value="type">
+                <option
+                  v-for="type in filterOptions.unitTypes"
+                  :key="type"
+                  :value="type"
+                >
                   {{ __(type) }}
                 </option>
               </select>
             </label>
+            <LinkControl
+              v-model="filters.project"
+              doctype="Real Estate Project"
+              :label="__('Project')"
+              :placeholder="__('Select a project')"
+            />
+            <LinkControl
+              v-model="filters.developer"
+              doctype="Property Developer"
+              :label="__('Developer')"
+              :placeholder="__('Select a developer')"
+            />
             <label
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
             >
-              {{ __('Project') }}
-              <input
-                v-model="filters.project"
-                type="text"
-                :placeholder="__('Project name')"
+              {{ __('Finishing') }}
+              <select
+                v-model="filters.finishingType"
                 class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
-                @keyup.enter="fetchUnits"
-              />
-            </label>
-            <label
-              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
-            >
-              {{ __('Developer') }}
-              <input
-                v-model="filters.developer"
-                type="text"
-                :placeholder="__('Developer name')"
-                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
-                @keyup.enter="fetchUnits"
-              />
+              >
+                <option value="">{{ __('All Finishing Types') }}</option>
+                <option
+                  v-for="type in filterOptions.finishingTypes"
+                  :key="type"
+                  :value="type"
+                >
+                  {{ __(type) }}
+                </option>
+              </select>
             </label>
             <label
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
@@ -345,6 +361,7 @@
 </template>
 
 <script setup>
+import LinkControl from '@/components/Controls/Link.vue'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { Button, Dialog, call, toast } from 'frappe-ui'
 
@@ -374,6 +391,7 @@ const props = defineProps({
   leadId: { type: String, required: true },
   interestCategory: { type: String, default: 'Resale' },
   includeUnit: { type: String, default: '' },
+  initialCriteria: { type: Object, default: () => ({}) },
   selectionMode: {
     type: String,
     default: 'single',
@@ -388,18 +406,29 @@ const loading = ref(false)
 const submitting = ref(false)
 const units = ref([])
 const selectedUnits = ref([])
+const selectedRecords = ref(new Map())
 const localCategory = ref(props.interestCategory)
 const selectionCommitted = ref(false)
 const matchProfile = ref({})
 const smartMatchActive = ref(false)
 const strictFilters = ref(false)
-const unitTypes = ['Villa', 'Chalet', 'Apartment', 'Duplex', 'Penthouse']
+const filterOptions = reactive({
+  locations: [],
+  unitTypes: ['Villa', 'Chalet', 'Apartment', 'Duplex', 'Penthouse'],
+  finishingTypes: [
+    'Core & Shell',
+    'Semi-Finished',
+    'Fully Finished',
+    'Ultra Super Lux',
+  ],
+})
 const filters = reactive({
   search: '',
   location: '',
   project: '',
   developer: '',
   unitType: '',
+  finishingType: '',
   minPrice: '',
   maxPrice: '',
 })
@@ -434,6 +463,7 @@ function isSelected(unit) {
 }
 
 function toggleUnit(unit) {
+  selectedRecords.value.set(unit.name, unit)
   if (props.selectionMode === 'single') {
     selectedUnits.value = [unit.name]
     return
@@ -467,6 +497,7 @@ function clearFilterValues() {
     project: '',
     developer: '',
     unitType: '',
+    finishingType: '',
     minPrice: '',
     maxPrice: '',
   })
@@ -477,8 +508,36 @@ function applyProfileToFilters(profile) {
   filters.project = profile.project || ''
   filters.developer = profile.developer || ''
   filters.unitType = profile.unit_type || ''
+  filters.finishingType = profile.finishing_type || ''
   filters.minPrice = profile.budget_min || ''
   filters.maxPrice = profile.budget || ''
+}
+
+function applyInitialCriteria() {
+  const criteria = props.initialCriteria || {}
+  filters.location = criteria.preferred_area || criteria.location || ''
+  filters.project = criteria.preferred_compound || criteria.project || ''
+  filters.developer = criteria.preferred_developer || criteria.developer || ''
+  filters.unitType = criteria.preferred_unit_type || criteria.unit_type || ''
+  filters.finishingType =
+    criteria.preferred_finishing_type || criteria.finishing_type || ''
+  filters.minPrice = criteria.minimum_budget || criteria.min_price || ''
+  filters.maxPrice = criteria.buyer_budget || criteria.max_price || ''
+}
+
+async function fetchFilterOptions() {
+  try {
+    const result = await call(
+      'real_estate_crm_customs.api.get_property_match_filter_options',
+      { interest_category: localCategory.value },
+    )
+    filterOptions.locations = result?.locations || []
+    if (result?.unit_types?.length) filterOptions.unitTypes = result.unit_types
+    if (result?.finishing_types?.length)
+      filterOptions.finishingTypes = result.finishing_types
+  } catch {
+    // Static schema options remain available if inventory-backed options fail.
+  }
 }
 
 async function resetToLeadProfile() {
@@ -500,6 +559,7 @@ async function fetchUnits({ hydrateProfile = false } = {}) {
         project: filters.project || null,
         developer: filters.developer || null,
         unit_type: filters.unitType || null,
+        finishing_type: filters.finishingType || null,
         min_price: filters.minPrice || null,
         max_price: filters.maxPrice || null,
         include_unit: props.includeUnit || null,
@@ -510,9 +570,10 @@ async function fetchUnits({ hydrateProfile = false } = {}) {
     matchProfile.value = result?.profile || {}
     smartMatchActive.value = Boolean(result?.smart_match_active)
     if (hydrateProfile) applyProfileToFilters(matchProfile.value)
-    selectedUnits.value = selectedUnits.value.filter((name) =>
-      units.value.some((unit) => unit.name === name),
-    )
+    units.value.forEach((unit) => {
+      if (selectedUnits.value.includes(unit.name))
+        selectedRecords.value.set(unit.name, unit)
+    })
     if (
       props.selectionMode === 'single' &&
       props.includeUnit &&
@@ -536,20 +597,22 @@ async function submitSelection() {
   if (!selectedUnits.value.length) return
   submitting.value = true
   try {
-    const selectedRecords = units.value.filter((unit) =>
-      selectedUnits.value.includes(unit.name),
-    )
+    const selectedPropertyRecords = selectedUnits.value
+      .map((name) => selectedRecords.value.get(name))
+      .filter(Boolean)
     if (props.linkOnSubmit) {
       await call('real_estate_crm_customs.api.link_interested_units', {
         lead: props.leadId,
         units: JSON.stringify(selectedUnits.value),
         interest_category: localCategory.value,
       })
-      emit('units-added', selectedRecords)
+      emit('units-added', selectedPropertyRecords)
     } else {
       emit(
         'selected',
-        props.selectionMode === 'single' ? selectedRecords[0] : selectedRecords,
+        props.selectionMode === 'single'
+          ? selectedPropertyRecords[0]
+          : selectedPropertyRecords,
       )
     }
     selectionCommitted.value = true
@@ -568,15 +631,32 @@ watch(
   (value) => {
     localCategory.value = value || 'Resale'
     selectedUnits.value = []
-    if (show.value) resetToLeadProfile()
+    selectedRecords.value = new Map()
+    if (show.value) initializePicker()
   },
 )
+
+async function initializePicker() {
+  clearFilterValues()
+  strictFilters.value = false
+  await fetchFilterOptions()
+  const hasInitialCriteria = Object.values(props.initialCriteria || {}).some(
+    (value) => value !== null && value !== undefined && value !== '',
+  )
+  if (hasInitialCriteria) {
+    applyInitialCriteria()
+    await fetchUnits()
+  } else {
+    await fetchUnits({ hydrateProfile: true })
+  }
+}
 
 watch(show, (value, previous) => {
   if (value) {
     selectionCommitted.value = false
     selectedUnits.value = props.includeUnit ? [props.includeUnit] : []
-    resetToLeadProfile()
+    selectedRecords.value = new Map()
+    initializePicker()
     return
   }
   if (previous && !selectionCommitted.value) emit('cancelled')

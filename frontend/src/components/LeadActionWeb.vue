@@ -86,18 +86,19 @@
           </div>
           <div class="flex shrink-0 flex-wrap gap-2">
             <Button
-              v-if="canStart"
-              :label="__('Start action')"
+              :label="
+                canExecuteNow
+                  ? __('Do {0} now', [currentAction.action_type])
+                  : context?.primary_command || __('Record action result')
+              "
               variant="solid"
               :disabled="hasBlockers"
-              @click="$emit('start-action', currentAction)"
-            />
-            <Button
-              v-else
-              :label="context?.primary_command || __('Complete action')"
-              variant="solid"
-              :disabled="hasBlockers"
-              @click="$emit('complete-action', currentAction)"
+              @click="
+                $emit(
+                  canExecuteNow ? 'execute-action' : 'complete-action',
+                  currentAction,
+                )
+              "
             />
             <Button
               :label="__('Cancel')"
@@ -119,7 +120,7 @@
         <div class="mt-1 text-xs text-ink-gray-6">
           {{
             __(
-              'Select the next permitted action. The system will then keep the action context until it is completed, rescheduled, or cancelled.',
+              'Choose an action and run it immediately, or schedule it for later when a calendar date is required.',
             )
           }}
         </div>
@@ -170,10 +171,15 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
 })
 
-defineEmits(['start-action', 'complete-action', 'plan-action', 'cancel-action'])
+defineEmits([
+  'execute-action',
+  'complete-action',
+  'plan-action',
+  'cancel-action',
+])
 
 const currentAction = computed(() => props.context?.current_action || null)
-const canStart = computed(() => {
+const canExecuteNow = computed(() => {
   const status = currentAction.value?.workflow_status
   return ['Planned', 'Due'].includes(status)
 })
