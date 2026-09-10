@@ -32,74 +32,89 @@ import { Dropdown } from 'frappe-ui'
 import { isMobileView } from '@/composables/settings'
 
 const props = defineProps({
-  actions: { type: [Object, Array, undefined], default: () => [] },
+  actions: { type: [Object, Array], default: () => [] },
   close: { type: Function, default: () => {} },
 })
 
-const normalActions = computed(() => {
-  return props.actions.filter((action) => !action.group)
+const actionList = computed(() => {
+  if (Array.isArray(props.actions)) return props.actions.filter(Boolean)
+  return props.actions && typeof props.actions === 'object'
+    ? [props.actions]
+    : []
 })
 
-const groupedWithLabelActions = computed(() => {
-  let _actions = []
+function actionItem(item) {
+  if (!item || typeof item !== 'object') return null
+  return {
+    ...item,
+    onClick: () => item.onClick?.(props.close),
+  }
+}
 
-  props.actions
+function groupedAction(action) {
+  const sourceItems = Array.isArray(action?.items)
+    ? action.items
+    : action?.label && typeof action?.onClick === 'function'
+      ? [action]
+      : []
+  const items = sourceItems.map(actionItem).filter(Boolean)
+  if (!items.length) return null
+  return { ...action, items }
+}
+
+const normalActions = computed(() =>
+  actionList.value.filter((action) => !action.group),
+)
+
+const groupedWithLabelActions = computed(() => {
+  const actions = []
+
+  actionList.value
     .filter((action) => action.buttonLabel && action.group)
     .forEach((action) => {
-      let groupIndex = _actions.findIndex((a) => a.label === action.buttonLabel)
+      const normalized = groupedAction(action)
+      if (!normalized) return
 
-      action.items = action.items.map((item) => {
-        return {
-          ...item,
-          onClick: () => item.onClick(props.close),
-        }
-      })
-
+      const groupIndex = actions.findIndex(
+        (item) => item.label === action.buttonLabel,
+      )
       if (groupIndex > -1) {
-        _actions[groupIndex].action.push(action)
+        actions[groupIndex].action.push(normalized)
       } else {
-        _actions.push({
+        actions.push({
           label: action.buttonLabel,
-          action: [action],
+          action: [normalized],
         })
       }
     })
-  return _actions
+
+  return actions
 })
 
 const groupedActions = computed(() => {
-  let _actions = []
-  let _normalActions = normalActions.value
+  const actions = []
+  const plainActions = normalActions.value
 
-  if (isMobileView.value && _normalActions.length) {
-    _actions.push({
+  if (isMobileView.value && plainActions.length) {
+    actions.push({
       group: __('Actions'),
       hideLabel: true,
-      items: _normalActions.map((action) => ({
-        label: action.label,
-        onClick: () => action.onClick(props.close),
-        icon: action.icon,
-      })),
+      items: plainActions.map(actionItem).filter(Boolean),
     })
   }
   if (isMobileView.value && groupedWithLabelActions.value.length) {
-    groupedWithLabelActions.value.map((group) => {
-      group.action.forEach((action) => _actions.push(action))
+    groupedWithLabelActions.value.forEach((group) => {
+      group.action.forEach((action) => actions.push(action))
     })
   }
 
-  props.actions
+  actionList.value
     .filter((action) => action.group && !action.buttonLabel)
     .forEach((action) => {
-      action.items = action.items.map((item) => {
-        return {
-          ...item,
-          onClick: () => item.onClick(props.close),
-        }
-      })
-      _actions.push(action)
+      const normalized = groupedAction(action)
+      if (normalized) actions.push(normalized)
     })
 
-  return _actions
+  return actions
 })
 </script>
