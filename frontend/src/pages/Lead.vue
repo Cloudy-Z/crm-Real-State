@@ -87,10 +87,10 @@
               <LeadActionWeb
                 :context="actionContext.data || {}"
                 :loading="actionContext.loading"
-                @execute-action="executeDynamicAction"
-                @complete-action="openCallLogDialog"
-                @plan-action="openNextActionDialog"
-                @cancel-action="cancelDynamicAction"
+                @execute-action="openUnifiedAction"
+                @complete-action="openUnifiedAction"
+                @plan-action="openUnifiedAction"
+                @cancel-action="openUnifiedCancellation"
               />
 
               <!-- Card 2: Flags (No-Answer Tracking) -->
@@ -473,6 +473,17 @@
     :docname="leadId"
     name="Leads"
   />
+  <LeadUnifiedActionDialog
+    v-model="showUnifiedActionDialog"
+    :lead-id="leadId"
+    :action="unifiedAction"
+    :context="actionContext.data || {}"
+    :lead="doc"
+    :force-immediate="unifiedForceImmediate"
+    :initial-cancel="unifiedInitialCancel"
+    @start-call="executePhoneCall"
+    @submitted="handleUnifiedActionSubmitted"
+  />
   <UnitSelectionDialog
     v-model="showInterestUnitPicker"
     :lead-id="leadId"
@@ -519,6 +530,7 @@ import LeadProgressGraph from '@/components/LeadProgressGraph.vue'
 import LeadSmartEvents from '@/components/LeadSmartEvents.vue'
 import LeadInterestGroups from '@/components/LeadInterestGroups.vue'
 import LeadActionWeb from '@/components/LeadActionWeb.vue'
+import LeadUnifiedActionDialog from '@/components/LeadUnifiedActionDialog.vue'
 import {
   setupCustomizations,
   copyToClipboard,
@@ -545,7 +557,7 @@ import {
   usePageMeta,
   toast,
 } from 'frappe-ui'
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useActiveTabManager } from '@/composables/useActiveTabManager'
 
@@ -570,6 +582,10 @@ const showDeleteLinkedDocModal = ref(false)
 const showConvertToDealModal = ref(false)
 const showFilesUploader = ref(false)
 const showInterestUnitPicker = ref(false)
+const showUnifiedActionDialog = ref(false)
+const unifiedAction = ref(null)
+const unifiedForceImmediate = ref(false)
+const unifiedInitialCancel = ref(false)
 const interestUnitCategory = ref('Resale')
 const interestUnitCurrent = ref('')
 const interestUnitCriteria = ref({})
@@ -910,7 +926,7 @@ async function triggerLeadCall() {
       (definition) => definition.action_type === 'Call',
     )
     if (callDefinition) {
-      await openNextActionDialog(callDefinition, { forceImmediate: true })
+      openUnifiedAction(callDefinition, { forceImmediate: true })
       return
     }
   }
@@ -918,11 +934,7 @@ async function triggerLeadCall() {
     toast.info(__('Complete the current required action before calling.'))
     return
   }
-  if (['Planned', 'Due'].includes(currentAction.workflow_status)) {
-    await executeDynamicAction(currentAction)
-    return
-  }
-  executePhoneCall()
+  openUnifiedAction(currentAction, { forceImmediate: true })
 }
 
 function executePhoneCall() {
@@ -942,8 +954,52 @@ function executePhoneCall() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Dynamic Action Web — each result closes only its current action
+// 3. Unified Action Web — one form, one final submission
 // ---------------------------------------------------------------------------
+function openUnifiedAction(action, { forceImmediate = false } = {}) {
+  if (!action?.action_type) {
+    toast.error(
+      __('The selected action is no longer available. Reload and retry.'),
+    )
+    return
+  }
+  unifiedAction.value = { ...action }
+  unifiedForceImmediate.value = forceImmediate
+  unifiedInitialCancel.value = false
+  showUnifiedActionDialog.value = true
+}
+
+function openUnifiedCancellation(action) {
+  if (!action?.action_type) return
+  unifiedAction.value = { ...action }
+  unifiedForceImmediate.value = false
+  unifiedInitialCancel.value = true
+  showUnifiedActionDialog.value = true
+}
+
+async function handleUnifiedActionSubmitted(result, payload) {
+  updateLeadActionState(result)
+  await reloadActionWeb()
+  if (result?.dispatch?.whatsapp_url) {
+    toast.success(
+      __('Offer recorded and WhatsApp opened with the unit details.'),
+    )
+  } else if (result?.event) {
+    toast.success(__('Action scheduled and linked to the Lead Event view.'))
+  } else {
+    toast.success(__('Action and all related Lead data were saved together.'))
+  }
+
+  const successor = result?.successor_action
+  if (payload?.result?.next_action?.execute_now && successor) {
+    await nextTick()
+    unifiedAction.value = successor
+    unifiedForceImmediate.value = true
+    showUnifiedActionDialog.value = true
+    if (successor.action_type === 'Call') executePhoneCall()
+  }
+}
+
 async function startDynamicAction(action) {
   try {
     const result = await call('real_estate_crm_customs.api.start_lead_action', {
@@ -1643,14 +1699,10 @@ function frappeNowDateTime() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
 }
 
-async function openInterestWorkflow() {
+function openInterestWorkflow() {
   const action = actionContext.data?.current_action
   if (action?.action_type === 'Add Interest') {
-    const currentAction = ['Planned', 'Due'].includes(action.workflow_status)
-      ? await startDynamicAction(action)
-      : action
-    if (!currentAction) return
-    await completeInterestAction(currentAction)
+    openUnifiedAction(action)
     return
   }
   if (action) {
@@ -1670,7 +1722,7 @@ async function openInterestWorkflow() {
     )
     return
   }
-  await openNextActionDialog(definition)
+  openUnifiedAction(definition)
 }
 
 async function completeInterestAction(action) {

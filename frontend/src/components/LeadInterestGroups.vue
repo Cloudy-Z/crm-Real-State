@@ -197,8 +197,20 @@ function recordDetails(row) {
   }
   return [
     { label: __('Requirements'), value: row.request_notes },
+    { label: __('Location / Area'), value: row.requested_area },
+    { label: __('Unit Type'), value: row.requested_unit_type },
+    { label: __('Maximum Budget'), value: row.requested_budget },
+    { label: __('Project'), value: row.requested_project },
+    { label: __('Developer'), value: row.requested_developer },
+    { label: __('Finishing'), value: row.requested_finishing_type },
+    { label: __('Delivery Time'), value: row.requested_delivery_time },
     { label: __('Request Status'), value: row.request_status },
-  ]
+  ].filter(
+    (detail) =>
+      detail.value !== null &&
+      detail.value !== undefined &&
+      detail.value !== '',
+  )
 }
 
 function unitHref(name) {
