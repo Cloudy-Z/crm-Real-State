@@ -193,9 +193,34 @@
                 </div>
               </div>
             </div>
-            <!-- Linked Properties Table -->
+            <!-- Independent Buyer Interest Workboard / Seller Properties -->
+            <template v-if="isBuyerLead">
+              <div
+                v-if="actionContext.loading"
+                class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
+              >
+                {{ __('Loading independent interest workflows...') }}
+              </div>
+              <div
+                v-else-if="!interestWorkboardRows.length"
+                class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
+              >
+                {{ __('No Lead Interests have been recorded yet.') }}
+              </div>
+              <LeadInterestWorkboard
+                v-else
+                :rows="interestWorkboardRows"
+                :can-review="canReviewInterestDeletion"
+                @execute-action="openUnifiedAction"
+                @plan-action="openUnifiedAction"
+                @cancel-action="openUnifiedCancellation"
+                @edit="editInterestRecord"
+                @request-delete="requestInterestDeletion"
+                @review="reviewInterestDeletion"
+              />
+            </template>
             <div
-              v-if="linkedProperties.loading"
+              v-else-if="linkedProperties.loading"
               class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
             >
               {{ __('Loading linked properties...') }}
@@ -210,15 +235,7 @@
               v-else
               class="overflow-hidden rounded border border-outline-gray-1"
             >
-              <LeadInterestGroups
-                v-if="isBuyerLead"
-                :rows="visibleLinkedPropertyRows"
-                :can-review="canReviewInterestDeletion"
-                @edit="editInterestRecord"
-                @request-delete="requestInterestDeletion"
-                @review="reviewInterestDeletion"
-              />
-              <table v-else class="w-full text-left text-sm">
+              <table class="w-full text-left text-sm">
                 <thead class="border-b bg-surface-gray-1 text-ink-gray-6">
                   <tr>
                     <th class="px-4 py-3 font-medium">
@@ -528,7 +545,7 @@ import ConvertToDealModal from '@/components/Modals/ConvertToDealModal.vue'
 import UnitSelectionDialog from '@/components/Modals/UnitSelectionDialog.vue'
 import LeadProgressGraph from '@/components/LeadProgressGraph.vue'
 import LeadSmartEvents from '@/components/LeadSmartEvents.vue'
-import LeadInterestGroups from '@/components/LeadInterestGroups.vue'
+import LeadInterestWorkboard from '@/components/LeadInterestWorkboard.vue'
 import LeadActionWeb from '@/components/LeadActionWeb.vue'
 import LeadUnifiedActionDialog from '@/components/LeadUnifiedActionDialog.vue'
 import {
@@ -747,6 +764,9 @@ const lastStatusAction = computed(
 )
 const canReviewInterestDeletion = computed(
   () => interestWorkflow.data?.can_review_deletions || false,
+)
+const interestWorkboardRows = computed(
+  () => actionContext.data?.interest_workboard || [],
 )
 
 const visibleLinkedPropertyRows = computed(() => {
@@ -2189,30 +2209,39 @@ async function openExistingInterestEditor() {
 }
 
 async function editInterestRecord(row) {
-  const categoryValues = await chooseInterestCategory({
-    editing: true,
-    interest_category: row.interest_category,
-    unit_interest_status: row.unit_interest_status || 'Active',
-  })
-  const category = categoryValues?.interest_category
+  const category = row.interest_category
   if (!category) return false
 
   let values = {
     interest_category: category,
-    unit_interest_status: categoryValues.unit_interest_status || 'Active',
   }
   if (['Resale', 'Primary'].includes(category)) {
-    const requirements = await collectInventoryInterestRequirements(category)
-    if (!requirements) return false
-    const currentUnit =
-      row.interest_record_type === 'Inventory Unit' ? row.name : ''
-    const selectedUnit = await selectInterestUnits(category, {
-      currentUnit,
-      criteria: requirements,
-      multiple: false,
+    const requirements = await collectInventoryInterestRequirements(category, {
+      preferred_area: row.requested_area,
+      preferred_unit_type: row.requested_unit_type,
+      preferred_developer: row.requested_developer,
+      preferred_compound: row.requested_project,
+      preferred_finishing_type: row.requested_finishing_type,
+      preferred_delivery_time: row.requested_delivery_time,
+      buyer_budget: row.requested_budget,
     })
-    if (!selectedUnit) return false
-    values = { ...values, ...requirements, unit: selectedUnit.name }
+    if (!requirements) return false
+    const isRequested =
+      row.workflow_status === 'Requested' &&
+      row.record_type !== 'Inventory Unit' &&
+      row.interest_record_type !== 'Inventory Unit'
+    if (isRequested) {
+      values = { ...values, ...requirements, requested_unit: 1 }
+    } else {
+      const currentUnit = row.unit || ''
+      const selectedUnit = await selectInterestUnits(category, {
+        currentUnit,
+        criteria: requirements,
+        multiple: false,
+      })
+      if (!selectedUnit) return false
+      values = { ...values, ...requirements, unit: selectedUnit.name }
+    }
   } else {
     const requestValues = await collectRequestInterest(
       category,
@@ -2235,7 +2264,7 @@ async function editInterestRecord(row) {
   try {
     await call('real_estate_crm_customs.api.update_interest_record', {
       lead: props.leadId,
-      row_name: row.interest_row_name,
+      row_name: row.name || row.interest_row_name,
       interest_data: JSON.stringify(values),
     })
     reloadActionWeb()
@@ -2275,7 +2304,7 @@ async function requestInterestDeletion(row) {
       'real_estate_crm_customs.api.request_interest_deletion',
       {
         lead: props.leadId,
-        row_name: row.interest_row_name,
+        row_name: row.name || row.interest_row_name,
         reason: values.reason,
       },
     )
@@ -2292,7 +2321,7 @@ async function requestInterestDeletion(row) {
   }
 }
 
-async function reviewInterestDeletion(row, decision) {
+async function reviewInterestDeletion(row, decision = 'Approve') {
   const values = await renderFieldLayoutDialog({
     title:
       decision === 'Approve'
@@ -2312,7 +2341,7 @@ async function reviewInterestDeletion(row, decision) {
   try {
     await call('real_estate_crm_customs.api.review_interest_deletion', {
       lead: props.leadId,
-      row_name: row.interest_row_name,
+      row_name: row.name || row.interest_row_name,
       request_name: row.deletion_request || null,
       decision,
       note: values.note || null,
@@ -2340,7 +2369,7 @@ function interestOptionLabel(row) {
       .filter(Boolean)
       .join(' — ') ||
     row.name
-  return `${row.interest_category || 'Interest'} — ${title} [${row.interest_row_name}]`
+  return `${row.interest_category || 'Interest'} — ${title} [${row.name || row.interest_row_name}]`
 }
 
 function reloadActionWeb() {

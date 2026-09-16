@@ -333,6 +333,7 @@
               <SelectField
                 v-model="draft.interestCategory"
                 :label="__('Interest Category')"
+                :disabled="isMatchRequested"
                 :options="[
                   'Resale',
                   'Primary',
@@ -555,6 +556,7 @@
             </div>
 
             <label
+              v-if="!isMatchRequested"
               class="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-outline-amber-2 bg-surface-amber-1 p-3"
             >
               <input
@@ -707,6 +709,7 @@ const SelectField = defineComponent({
     optionLabels: { type: Object, default: () => ({}) },
     required: { type: Boolean, default: false },
     allowCustom: { type: Boolean, default: false },
+    disabled: { type: Boolean, default: false },
   },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
@@ -718,7 +721,9 @@ const SelectField = defineComponent({
           {
             value: props.modelValue,
             required: props.required,
-            class: 'field-input',
+            disabled: props.disabled,
+            class:
+              'field-input disabled:cursor-not-allowed disabled:bg-surface-gray-1',
             onChange: (event) => emit('update:modelValue', event.target.value),
           },
           [
@@ -827,6 +832,11 @@ const isInitialQualification = computed(
 const isOfferFollowUp = computed(
   () => isCall.value && actionPurpose.value === 'Offer Follow-up',
 )
+const isMatchRequested = computed(
+  () =>
+    actionType.value === 'Add Interest' &&
+    actionPurpose.value === 'Match Requested Unit',
+)
 const isGeneralCall = computed(
   () => isCall.value && !isInitialQualification.value && !isOfferFollowUp.value,
 )
@@ -879,7 +889,7 @@ const showSmartMatch = computed(
   () => showInterestBlock.value && isInventoryInterest.value,
 )
 const shouldRequireNextAction = computed(() => {
-  if (scheduleOnly.value) return false
+  if (scheduleOnly.value || isSendOffer.value) return false
   if (draft.cancelAction) return true
   if (actionType.value === 'Add Interest') return true
   if (!showResultSections.value) return false
@@ -888,6 +898,12 @@ const shouldRequireNextAction = computed(() => {
     if (draft.contactResult !== 'Answered') return Boolean(draft.contactResult)
     return draft.qualification === 'Interested'
   }
+  if (isOfferDecision.value && draft.offerDecision === 'Change Requirements')
+    return true
+  if (scopedInterest.value)
+    return !['Rejected', 'Superseded', 'Fulfilled', 'Cancelled'].includes(
+      projectedInterestStatus(),
+    )
   return (
     props.context?.qualification === 'Interested' || showInterestBlock.value
   )
@@ -901,7 +917,7 @@ const scopedRows = computed(() => {
   return names.size ? rows.filter((row) => names.has(row.name)) : rows
 })
 const ownerRows = computed(() =>
-  (props.context?.interest_rows || []).filter(
+  scopedRows.value.filter(
     (row) => row.interest_category === 'Resale' && row.unit,
   ),
 )
@@ -909,6 +925,9 @@ const ownerInterestOptions = computed(() =>
   ownerRows.value.map((row) => row.name),
 )
 const offerRowOptions = computed(() => scopedRows.value.map((row) => row.name))
+const scopedInterest = computed(() =>
+  scopedRows.value.length === 1 ? scopedRows.value[0] : null,
+)
 const rowLabels = computed(() =>
   Object.fromEntries(
     (props.context?.interest_rows || []).map((row) => [row.name, row.label]),
@@ -966,25 +985,53 @@ function resetDraft() {
     unitOutcome: '',
     rescheduleTo: '',
     offerDecision: '',
-    selectedOffer: '',
+    selectedOffer:
+      actionType.value === 'Offer Decision'
+        ? (props.action?.interest_rows ||
+            props.action?.interest_row_names ||
+            [])[0] || ''
+        : '',
     selectedInterestRows: [
       ...(props.action?.interest_rows ||
         props.action?.interest_row_names ||
         []),
     ],
-    ownerInterestRow: '',
+    ownerInterestRow: isOwnerMeeting.value
+      ? (props.action?.interest_rows ||
+          props.action?.interest_row_names ||
+          [])[0] || ''
+      : '',
     showingInterestRow:
       (props.action?.interest_rows ||
         props.action?.interest_row_names ||
         [])[0] || '',
-    interestCategory: '',
-    preferredArea: props.lead?.preferred_area || '',
-    preferredUnitType: props.lead?.preferred_unit_type || '',
-    buyerBudget: props.lead?.buyer_budget || '',
-    preferredProject: props.lead?.preferred_compound || '',
-    preferredDeveloper: props.lead?.preferred_developer || '',
-    preferredFinishing: props.lead?.preferred_finishing_type || '',
-    preferredDelivery: props.lead?.preferred_delivery_time || '',
+    interestCategory: isMatchRequested.value
+      ? scopedInterest.value?.interest_category || ''
+      : '',
+    preferredArea:
+      scopedInterest.value?.requested_area || props.lead?.preferred_area || '',
+    preferredUnitType:
+      scopedInterest.value?.requested_unit_type ||
+      props.lead?.preferred_unit_type ||
+      '',
+    buyerBudget:
+      scopedInterest.value?.requested_budget || props.lead?.buyer_budget || '',
+    preferredProject:
+      scopedInterest.value?.requested_project ||
+      props.lead?.preferred_compound ||
+      '',
+    preferredDeveloper:
+      scopedInterest.value?.requested_developer ||
+      props.lead?.preferred_developer ||
+      '',
+    preferredFinishing:
+      scopedInterest.value?.requested_finishing_type ||
+      props.lead?.preferred_finishing_type ||
+      '',
+    preferredDelivery:
+      scopedInterest.value?.requested_delivery_time ||
+      props.lead?.preferred_delivery_time ||
+      '',
     requestNotes: '',
     internationalType: '',
     internationalCountry: '',
@@ -1096,7 +1143,11 @@ function validateInterestRequirements({ requireResolution = true } = {}) {
     !draft.requestedUnit &&
     !draft.selectedUnits.length
   ) {
-    toast.error(__('Select matching units or choose Requested Unit.'))
+    toast.error(
+      isMatchRequested.value
+        ? __('Select at least one matching inventory unit.')
+        : __('Select matching units or choose Requested Unit.'),
+    )
     return false
   }
   return true
@@ -1219,21 +1270,150 @@ function offerDecisionOptions() {
   return []
 }
 
-function buildNextActionOptions() {
-  let options = normalizedPolicyOptions()
-  if (showInterestBlock.value) options = interestDrivenOptions()
-  if (isOfferDecision.value) options = offerDecisionOptions()
-  if (isSendOffer.value) {
-    options = [
+function projectedInterestStatus() {
+  const current = scopedInterest.value?.workflow_status || ''
+  if (isOfferFollowUp.value && draft.contactResult === 'Answered') {
+    return (
       {
+        Viewed: 'Offer Viewed',
+        'Offer Accepted': 'Offer Accepted',
+        Rejected: 'Rejected',
+        'Needs Alternatives': 'Superseded',
+      }[draft.outcome] || current
+    )
+  }
+  if (isOfferDecision.value) {
+    return draft.offerDecision === 'Select an Offer'
+      ? 'Offer Accepted'
+      : draft.offerDecision === 'Change Requirements'
+        ? 'Superseded'
+        : current
+  }
+  if (isNegotiation.value)
+    return draft.outcome === 'Declined' ? 'Rejected' : 'Negotiating'
+  if (isShowing.value) {
+    if (draft.outcome === 'Completed')
+      return (
+        {
+          Interested: 'Shown - Interested',
+          Considering: 'Shown - Considering',
+          'No Feedback': 'Shown - Considering',
+          Rejected: 'Rejected',
+        }[draft.unitOutcome] || current
+      )
+    if (
+      ['Buyer No Show', 'Seller/Unit Unavailable', 'Cancelled'].includes(
+        draft.outcome,
+      )
+    )
+      return 'Negotiating'
+  }
+  return current
+}
+
+function independentInterestOptions() {
+  const row = scopedInterest.value
+  if (!row) return []
+  const status = projectedInterestStatus()
+  const scope = {
+    interest_rows: [row.name],
+    unit: row.unit || null,
+  }
+  const options = []
+  if (status === 'Requested') {
+    if (['Resale', 'Primary'].includes(row.interest_category))
+      options.push({
+        ...scope,
+        action_type: 'Add Interest',
+        purpose: 'Match Requested Unit',
+        label: __('Run Smart Match and link inventory'),
+      })
+    options.push(
+      {
+        ...scope,
+        action_type: 'Call',
+        purpose: 'Requirements Discovery',
+        label: __('Follow up this request'),
+      },
+      {
+        ...scope,
+        action_type: 'Meeting',
+        purpose: 'Explore Meeting',
+        label: __('Explore this requirement'),
+      },
+    )
+  }
+  if (status === 'Matched') {
+    options.push(
+      {
+        ...scope,
+        action_type: 'Call',
+        purpose: 'General Follow-up',
+        label: __('Discuss this matched unit'),
+      },
+      {
+        ...scope,
+        action_type: 'Meeting',
+        purpose: 'Explore Meeting',
+        label: __('Explore this matched unit'),
+      },
+    )
+  }
+  if (['Offer Sent', 'Offer Viewed'].includes(status)) {
+    options.push(
+      {
+        ...scope,
         action_type: 'Offer Decision',
         purpose: 'Offer Decision',
-        label: __('Select an offer or change requirements'),
-        interest_rows: [...draft.selectedInterestRows],
-        key: 'Offer Decision::Offer Decision',
+        label: __('Record this offer decision'),
       },
-    ]
+      {
+        ...scope,
+        action_type: 'Call',
+        purpose: 'Offer Follow-up',
+        label: __('Follow up this offer'),
+      },
+    )
   }
+  if (
+    [
+      'Offer Accepted',
+      'Negotiating',
+      'Shown - Considering',
+      'Shown - Interested',
+    ].includes(status)
+  ) {
+    options.push(
+      {
+        ...scope,
+        action_type: 'Negotiation Follow-up',
+        purpose: 'Negotiation Follow-up',
+        label: __('Continue this unit negotiation'),
+      },
+      {
+        ...scope,
+        action_type: 'Showing',
+        purpose: 'Showing Confirmation',
+        label: __('Schedule or hold this unit showing'),
+      },
+    )
+    if (row.interest_category === 'Resale')
+      options.push({
+        ...scope,
+        action_type: 'Meeting',
+        purpose: 'Meeting with Owner',
+        label: __('Meet this Resale unit owner'),
+      })
+  }
+  return options.map((item) => ({ ...item, key: actionKey(item) }))
+}
+
+function buildNextActionOptions() {
+  let options = normalizedPolicyOptions()
+  if (scopedInterest.value) options = independentInterestOptions()
+  if (showInterestBlock.value) options = interestDrivenOptions()
+  if (isOfferDecision.value) options = offerDecisionOptions()
+  if (isSendOffer.value) options = []
   const seen = new Set()
   return options.filter((item) => {
     if (!item?.action_type || seen.has(item.key)) return false
@@ -1382,7 +1562,9 @@ function buildActionPayload() {
       ? draft.showingInterestRow
         ? [draft.showingInterestRow]
         : []
-      : definition.interest_row_names || definition.interest_rows || []
+      : isSendOffer.value
+        ? [...draft.selectedInterestRows]
+        : definition.interest_row_names || definition.interest_rows || []
   return {
     action_type: definition.action_type,
     purpose: definition.purpose,
