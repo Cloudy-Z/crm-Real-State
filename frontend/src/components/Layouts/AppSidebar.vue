@@ -301,9 +301,19 @@ const links = [
     to: 'Real Estate Units',
   },
   {
-    label: 'Real Estate Projects',
+    label: 'Compounds',
     icon: LucideBuilding2,
     to: 'Real Estate Projects',
+  },
+  {
+    label: 'Property Developers',
+    icon: LucideBuilding2,
+    to: 'Property Developers',
+  },
+  {
+    label: 'Destinations',
+    icon: PinIcon,
+    to: 'Real Estate Destinations',
   },
   {
     label: 'Notes',
@@ -418,6 +428,10 @@ function getIcon(routeName, icon) {
       return LucideHouse
     case 'Real Estate Projects':
       return LucideBuilding2
+    case 'Property Developers':
+      return LucideBuilding2
+    case 'Real Estate Destinations':
+      return PinIcon
     case 'Notes':
       return NoteIcon
     case 'Call Logs':

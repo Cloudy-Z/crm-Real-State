@@ -343,18 +343,24 @@
                 required
               />
               <template v-if="isInventoryInterest">
-                <SelectField
-                  v-model="draft.preferredArea"
-                  :label="__('Preferred Location / Area')"
-                  :options="filterOptions.locations"
-                  allow-custom
-                  required
+                <LinkControl
+                  v-model="draft.preferredDestination"
+                  doctype="Real Estate Destination"
+                  :label="__('Preferred Destination')"
+                  :placeholder="__('Select a destination')"
                 />
-                <SelectField
+                <p
+                  v-if="draft.legacyPreferredArea && !draft.preferredDestination"
+                  class="self-end rounded bg-surface-amber-1 px-3 py-2 text-xs text-ink-amber-3"
+                >
+                  {{ __('Legacy location') }}: {{ draft.legacyPreferredArea }}.
+                  {{ __('Select its canonical Destination before submitting.') }}
+                </p>
+                <LinkControl
                   v-model="draft.preferredUnitType"
+                  doctype="Real Estate Unit Type"
                   :label="__('Preferred Unit Type')"
-                  :options="filterOptions.unitTypes"
-                  required
+                  :placeholder="__('Select a unit type')"
                 />
                 <label class="field-label">
                   {{ __('Maximum Budget') }} *
@@ -369,8 +375,8 @@
                 <LinkControl
                   v-model="draft.preferredProject"
                   doctype="Real Estate Project"
-                  :label="__('Preferred Project')"
-                  :placeholder="__('Select a project')"
+                  :label="__('Preferred Compound')"
+                  :placeholder="__('Select a compound')"
                 />
                 <LinkControl
                   v-model="draft.preferredDeveloper"
@@ -477,10 +483,11 @@
               v-else-if="matches.length"
               class="grid max-h-[380px] gap-3 overflow-auto pr-1 lg:grid-cols-2"
             >
-              <button
+              <div
                 v-for="unit in matches"
                 :key="unit.name"
-                type="button"
+                role="button"
+                tabindex="0"
                 class="rounded-xl border p-4 text-left transition duration-150 active:scale-[0.99]"
                 :class="
                   isUnitSelected(unit.name)
@@ -488,17 +495,23 @@
                     : 'border-outline-gray-2 bg-surface-white hover:bg-surface-gray-1'
                 "
                 @click="toggleUnit(unit.name)"
+                @keydown.enter.prevent="toggleUnit(unit.name)"
               >
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
                     <p class="truncate font-semibold text-ink-gray-9">
-                      {{ unit.location || __('Location not set') }}
+                      {{
+                        unit.destination_label ||
+                        unit.destination ||
+                        unit.location ||
+                        __('Destination not set')
+                      }}
                     </p>
                     <p class="truncate text-sm text-ink-gray-7">
                       {{
                         unit.project_label ||
                         unit.project ||
-                        __('Project not set')
+                        __('Compound not set')
                       }}
                     </p>
                   </div>
@@ -509,14 +522,21 @@
                       {{ unit.match_score }}%
                     </span>
                     <p class="mt-1 font-semibold text-ink-gray-9">
-                      {{ formatPrice(unit.price) }}
+                      {{
+                        formatPrice(
+                          unit.effective_price ?? unit.total_gross ?? unit.price,
+                        )
+                      }}
                     </p>
                   </div>
                 </div>
                 <div
                   class="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-surface-gray-1 p-3 text-xs text-ink-gray-7"
                 >
-                  <span>{{ __('Type') }}: {{ unit.unit_type || '—' }}</span>
+                  <span
+                    >{{ __('Type') }}:
+                    {{ unit.physical_unit_type || unit.unit_type || '—' }}</span
+                  >
                   <span
                     >{{ __('Developer') }}: {{ unit.developer || '—' }}</span
                   >
@@ -542,7 +562,13 @@
                     {{ gap }}
                   </span>
                 </div>
-              </button>
+                <Button
+                  class="mt-3"
+                  :label="__('Open Unit')"
+                  variant="ghosted"
+                  @click.stop="openUnit(unit)"
+                />
+              </div>
             </div>
             <div
               v-else
@@ -671,6 +697,7 @@
 
 <script setup>
 import LinkControl from '@/components/Controls/Link.vue'
+import { useDoctypeModal } from '@/composables/doctypeModal'
 import { Button, Dialog, call, toast } from 'frappe-ui'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 
@@ -803,7 +830,6 @@ const matchesLoading = ref(false)
 const matches = ref([])
 const callStarted = ref(false)
 const filterOptions = reactive({
-  locations: [],
   unitTypes: [
     'Apartment',
     'Duplex',
@@ -821,6 +847,7 @@ const filterOptions = reactive({
   ],
 })
 const draft = reactive({})
+const { showModal } = useDoctypeModal()
 
 const actionType = computed(() => props.action?.action_type || '')
 const actionPurpose = computed(() => props.action?.purpose || '')
@@ -1008,7 +1035,11 @@ function resetDraft() {
     interestCategory: isMatchRequested.value
       ? scopedInterest.value?.interest_category || ''
       : '',
-    preferredArea:
+    preferredDestination:
+      scopedInterest.value?.requested_destination ||
+      props.lead?.preferred_destination ||
+      '',
+    legacyPreferredArea:
       scopedInterest.value?.requested_area || props.lead?.preferred_area || '',
     preferredUnitType:
       scopedInterest.value?.requested_unit_type ||
@@ -1061,10 +1092,6 @@ async function loadFilterOptions() {
       'real_estate_crm_customs.api.get_property_match_filter_options',
       { interest_category: draft.interestCategory },
     )
-    filterOptions.locations = mergeCurrentOption(
-      result?.locations || [],
-      draft.preferredArea,
-    )
     if (result?.unit_types?.length)
       filterOptions.unitTypes = mergeCurrentOption(
         result.unit_types,
@@ -1088,12 +1115,13 @@ async function loadMatches() {
       'real_estate_crm_customs.api.get_smart_matched_units',
       {
         lead: props.leadId,
+        interest: scopedInterest.value?.name || null,
         interest_category: draft.interestCategory,
         search: draft.matchSearch || null,
-        location: draft.preferredArea || null,
+        destination: draft.preferredDestination || null,
         project: draft.preferredProject || null,
         developer: draft.preferredDeveloper || null,
-        unit_type: draft.preferredUnitType || null,
+        physical_unit_type: draft.preferredUnitType || null,
         finishing_type: draft.preferredFinishing || null,
         max_price: draft.buyerBudget || null,
         strict_filters: draft.strictFilters ? 1 : 0,
@@ -1118,11 +1146,11 @@ function validateInterestRequirements({ requireResolution = true } = {}) {
   }
   if (isInventoryInterest.value) {
     if (
-      !draft.preferredArea ||
+      !draft.preferredDestination ||
       !draft.preferredUnitType ||
       !draft.buyerBudget
     ) {
-      toast.error(__('Location, unit type, and maximum budget are required.'))
+      toast.error(__('Destination, unit type, and maximum budget are required.'))
       return false
     }
   }
@@ -1163,6 +1191,15 @@ function toggleUnit(name) {
   if (selected.has(name)) selected.delete(name)
   else selected.add(name)
   draft.selectedUnits = [...selected]
+}
+
+function openUnit(unit) {
+  showModal({
+    name: unit.name,
+    doctype: 'Real Estate Unit',
+    title: __('Real Estate Unit'),
+    callbacks: { afterUpdate: () => loadMatches() },
+  })
 }
 
 function onRequestedUnitChange() {
@@ -1459,7 +1496,7 @@ function buildInterestPayload() {
     international_type: draft.internationalType || null,
     international_country: draft.internationalCountry || null,
     international_details: draft.internationalDetails || null,
-    preferred_area: draft.preferredArea || null,
+    preferred_destination: draft.preferredDestination || null,
     preferred_unit_type: draft.preferredUnitType || null,
     buyer_budget: draft.buyerBudget || null,
     preferred_compound: draft.preferredProject || null,
@@ -1655,7 +1692,7 @@ let matchRefreshTimer = null
 watch(
   () => [
     draft.interestCategory,
-    draft.preferredArea,
+    draft.preferredDestination,
     draft.preferredUnitType,
     draft.buyerBudget,
     draft.preferredProject,
@@ -1667,7 +1704,7 @@ watch(
     clearTimeout(matchRefreshTimer)
     if (
       !showSmartMatch.value ||
-      !draft.preferredArea ||
+      !draft.preferredDestination ||
       !draft.preferredUnitType ||
       !draft.buyerBudget
     )

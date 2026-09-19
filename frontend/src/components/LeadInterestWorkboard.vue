@@ -28,7 +28,16 @@
           </div>
           <p class="mt-1 text-xs text-ink-gray-5">
             {{ interest.name }}
-            <template v-if="interest.unit"> · {{ interest.unit }}</template>
+            <template v-if="interest.unit">
+              ·
+              <button
+                type="button"
+                class="font-medium text-ink-blue-3 hover:underline"
+                @click="$emit('open-unit', interest.unit)"
+              >
+                {{ interest.unit }}
+              </button>
+            </template>
           </p>
         </div>
 
@@ -96,7 +105,10 @@
             interest.unit || interest.request_notes || __('Requested Unit')
           "
         />
-        <Fact :label="__('Requested Area')" :value="interest.requested_area" />
+        <Fact
+          :label="__('Requested Destination')"
+          :value="interest.requested_destination || interest.requested_area"
+        />
         <Fact
           :label="__('Requested Type')"
           :value="interest.requested_unit_type"
@@ -105,7 +117,7 @@
           :label="__('Requested Budget')"
           :value="formatPrice(interest.requested_budget)"
         />
-        <Fact :label="__('Project')" :value="interest.requested_project" />
+        <Fact :label="__('Compound')" :value="interest.requested_project" />
         <Fact :label="__('Developer')" :value="interest.requested_developer" />
         <Fact
           :label="__('Finishing')"
@@ -169,6 +181,7 @@ defineEmits([
   'edit',
   'request-delete',
   'review',
+  'open-unit',
 ])
 
 const Fact = defineComponent({

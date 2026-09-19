@@ -1,7 +1,11 @@
 <template>
   <LayoutHeader>
     <template #left-header>
-      <ViewBreadcrumbs v-model="viewControls" :routeName="routeName" />
+      <ViewBreadcrumbs
+        v-model="viewControls"
+        :routeName="routeName"
+        :label="displayName"
+      />
     </template>
     <template #right-header>
       <Button
@@ -41,7 +45,7 @@
             {{ getPrimaryLabel(record) }}
           </div>
           <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink-gray-6">
-            <span v-for="field in secondaryFields" :key="field" v-show="record[field]">
+            <span v-for="field in secondaryFields" v-show="record[field]" :key="field">
               {{ __(fieldLabels[field] || field) }}: {{ record[field] }}
             </span>
           </div>
@@ -66,7 +70,7 @@
     }"
     @loadMore="() => loadMore++"
   />
-  <EmptyState v-else :name="routeName" />
+  <EmptyState v-else :name="displayName" />
 </template>
 
 <script setup>
@@ -90,6 +94,8 @@ const viewControls = ref(null)
 const pageConfig = computed(() => route.meta?.realEstate || {})
 const doctype = computed(() => pageConfig.value.doctype)
 const routeName = computed(() => pageConfig.value.routeName || route.name)
+const displayName = computed(() => pageConfig.value.label || routeName.value)
+const entityLabel = computed(() => pageConfig.value.entityLabel || doctype.value)
 const defaultViewName = computed(() => pageConfig.value.defaultViewName || `${routeName.value} View`)
 const primaryField = computed(() => pageConfig.value.primaryField || 'name')
 const secondaryFields = computed(() => pageConfig.value.secondaryFields || [])
@@ -115,7 +121,7 @@ const modalCallbacks = {
 function createRecord() {
   showModal({
     doctype: doctype.value,
-    title: routeName.value,
+    title: entityLabel.value,
     callbacks: modalCallbacks,
   })
 }
@@ -124,7 +130,7 @@ function editRecord(name) {
   showModal({
     name,
     doctype: doctype.value,
-    title: routeName.value,
+    title: entityLabel.value,
     callbacks: modalCallbacks,
   })
 }

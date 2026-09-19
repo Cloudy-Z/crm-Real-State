@@ -187,7 +187,7 @@
                     <Button
                       :label="__('Edit Existing')"
                       variant="subtle"
-                      @click="openInterestWorkflow"
+                      @click="openExistingInterestEditor"
                     />
                   </div>
                 </div>
@@ -217,6 +217,7 @@
                 @edit="editInterestRecord"
                 @request-delete="requestInterestDeletion"
                 @review="reviewInterestDeletion"
+                @open-unit="openUnitRecord"
               />
             </template>
             <div
@@ -239,13 +240,13 @@
                 <thead class="border-b bg-surface-gray-1 text-ink-gray-6">
                   <tr>
                     <th class="px-4 py-3 font-medium">
-                      {{ __('Property Code / SKU') }}
+                      {{ __('Unit Number / SKU') }}
                     </th>
                     <th class="px-4 py-3 font-medium">
                       {{ __('Property Title / Unit') }}
                     </th>
                     <th class="px-4 py-3 font-medium">
-                      {{ __('Compound / Project') }}
+                      {{ __('Compound') }}
                     </th>
                     <th class="px-4 py-3 font-medium">{{ __('Developer') }}</th>
                     <th class="px-4 py-3 font-medium">{{ __('Unit Type') }}</th>
@@ -253,7 +254,7 @@
                       {{ __('Finishing Type') }}
                     </th>
                     <th class="px-4 py-3 font-medium">
-                      {{ __('Target Asking Price') }}
+                      {{ __('Total Gross') }}
                     </th>
                     <th class="px-4 py-3 font-medium">{{ __('Status') }}</th>
                   </tr>
@@ -265,7 +266,15 @@
                     class="border-b last:border-b-0"
                   >
                     <td class="px-4 py-3 text-ink-gray-9">
-                      {{ row.sku || row.property_code || __('—') }}
+                      <button
+                        v-if="row.name"
+                        type="button"
+                        class="font-medium text-ink-blue-3 hover:underline"
+                        @click="openUnitRecord(row.name)"
+                      >
+                        {{ row.unit_number || row.sku || row.name }}
+                      </button>
+                      <template v-else>{{ __('—') }}</template>
                     </td>
                     <td class="px-4 py-3 text-ink-gray-8">
                       {{ row.property_title || row.name || __('—') }}
@@ -277,13 +286,17 @@
                       {{ row.developer || __('—') }}
                     </td>
                     <td class="px-4 py-3 text-ink-gray-8">
-                      {{ row.unit_type || __('—') }}
+                      {{ row.physical_unit_type || row.unit_type || __('—') }}
                     </td>
                     <td class="px-4 py-3 text-ink-gray-8">
                       {{ row.finishing_type || __('—') }}
                     </td>
                     <td class="px-4 py-3 text-ink-gray-8">
-                      {{ formatPrice(row.price) }}
+                      {{
+                        formatPrice(
+                          row.effective_price ?? row.total_gross ?? row.price,
+                        )
+                      }}
                     </td>
                     <td class="px-4 py-3 text-ink-gray-8">
                       {{ row.status || __('—') }}
@@ -504,6 +517,7 @@
   <UnitSelectionDialog
     v-model="showInterestUnitPicker"
     :lead-id="leadId"
+    :interest-id="interestUnitInterest"
     :interest-category="interestUnitCategory"
     :include-unit="interestUnitCurrent"
     :initial-criteria="interestUnitCriteria"
@@ -562,6 +576,7 @@ import { statusesStore } from '@/stores/statuses'
 import { getMeta } from '@/stores/meta'
 import { useDocument } from '@/data/document'
 import { callEnabled } from '@/composables/telephony'
+import { useDoctypeModal } from '@/composables/doctypeModal'
 import {
   createResource,
   FileUploader,
@@ -585,6 +600,7 @@ const { doctypeMeta } = getMeta('CRM Lead')
 
 const route = useRoute()
 const router = useRouter()
+const { showModal: showDoctypeModal } = useDoctypeModal()
 
 const props = defineProps({
   leadId: { type: String, required: true },
@@ -604,6 +620,7 @@ const unifiedAction = ref(null)
 const unifiedForceImmediate = ref(false)
 const unifiedInitialCancel = ref(false)
 const interestUnitCategory = ref('Resale')
+const interestUnitInterest = ref('')
 const interestUnitCurrent = ref('')
 const interestUnitCriteria = ref({})
 const interestUnitSelectionMode = ref('multiple')
@@ -809,7 +826,7 @@ const sections = createResource({
 // Computed Rows
 // ---------------------------------------------------------------------------
 const buyerInterestPreferenceRows = computed(() => [
-  { label: __('Preferred Area'), value: formatPreferredArea() },
+  { label: __('Preferred Destination'), value: formatPreferredDestination() },
   { label: __('Unit Type'), value: doc.value.preferred_unit_type },
   { label: __('Developer'), value: doc.value.preferred_developer },
   { label: __('Compound'), value: doc.value.preferred_compound },
@@ -849,9 +866,14 @@ function formatPrice(value) {
   return value
 }
 
-function formatPreferredArea() {
-  if (!doc.value.preferred_area && !doc.value.buyer_budget) return ''
-  return [doc.value.preferred_area, doc.value.area_unit]
+function formatPreferredDestination() {
+  if (
+    !doc.value.preferred_destination &&
+    !doc.value.preferred_area &&
+    !doc.value.buyer_budget
+  )
+    return ''
+  return [doc.value.preferred_destination || doc.value.preferred_area]
     .filter(Boolean)
     .join(' ')
 }
@@ -1020,705 +1042,6 @@ async function handleUnifiedActionSubmitted(result, payload) {
   }
 }
 
-async function startDynamicAction(action) {
-  try {
-    const result = await call('real_estate_crm_customs.api.start_lead_action', {
-      lead: props.leadId,
-      action_name: action.name,
-    })
-    await actionContext.reload()
-    return result?.action || action
-  } catch (err) {
-    toast.error(
-      err.messages?.[0] || err.message || __('Could not start action'),
-    )
-    return null
-  }
-}
-
-async function executeDynamicAction(action) {
-  const activeAction = ['Planned', 'Due'].includes(action.workflow_status)
-    ? await startDynamicAction(action)
-    : action
-  if (!activeAction) return
-  if (activeAction.action_type === 'Call') {
-    executePhoneCall()
-    toast.success(
-      __('Call started. Return to this Lead and select Record Call result.'),
-    )
-    return
-  }
-  await openCallLogDialog(activeAction)
-}
-
-async function continueImmediateSuccessor(successor, nextAction) {
-  if (!successor || !nextAction?.execute_now) return
-  await executeDynamicAction(successor)
-}
-
-async function cancelDynamicAction(action) {
-  const values = await renderFieldLayoutDialog({
-    title: __('Cancel Current Action'),
-    fields: [
-      {
-        fieldname: 'reason',
-        fieldtype: 'Small Text',
-        label: __('Cancellation reason'),
-        reqd: 1,
-      },
-    ],
-    submitLabel: __('Cancel Action'),
-  })
-  if (!values?.reason) return
-
-  const nextAction = actionNeedsNextAction(action, { outcome: 'Cancelled' })
-    ? await collectNextAction(action, { outcome: 'Cancelled' })
-    : null
-  if (actionNeedsNextAction(action, { outcome: 'Cancelled' }) && !nextAction)
-    return
-
-  try {
-    const result = await call(
-      'real_estate_crm_customs.api.cancel_lead_action',
-      {
-        lead: props.leadId,
-        action_name: action.name,
-        reason: values.reason,
-        next_action: nextAction ? JSON.stringify(nextAction) : null,
-      },
-    )
-    reloadActionWeb()
-    toast.success(
-      __('Action cancelled and the required follow-up was preserved.'),
-    )
-    await continueImmediateSuccessor(result?.successor_action, nextAction)
-  } catch (err) {
-    toast.error(
-      err.messages?.[0] || err.message || __('Could not cancel action'),
-    )
-  }
-}
-
-async function openCallLogDialog(action = null) {
-  const currentAction = action || actionContext.data?.current_action
-  if (!currentAction) {
-    toast.info(__('There is no current workflow action to complete.'))
-    return
-  }
-
-  if (currentAction.action_type === 'Add Interest') {
-    await completeInterestAction(currentAction)
-    return
-  }
-
-  const rawValues = await collectActionResult(currentAction)
-  if (!rawValues) return
-  const values = normalizeActionResult(currentAction, rawValues)
-  if (!values) return
-
-  if (actionNeedsNextAction(currentAction, values)) {
-    const nextAction = await collectNextAction(currentAction, values)
-    if (!nextAction) return
-    values.next_action = nextAction
-  }
-
-  const dispatchWindow =
-    currentAction.action_type === 'Send Offer'
-      ? window.open('about:blank', '_blank')
-      : null
-  try {
-    const result = await call(
-      'real_estate_crm_customs.api.complete_lead_action',
-      {
-        lead: props.leadId,
-        action_name: currentAction.name,
-        result_data: JSON.stringify(values),
-        client_request_id: createClientRequestId(),
-        expected_modified: currentAction.modified,
-      },
-    )
-    updateLeadActionState(result)
-    reloadActionWeb()
-    if (result?.dispatch?.whatsapp_url) {
-      if (dispatchWindow)
-        dispatchWindow.location.href = result.dispatch.whatsapp_url
-      else window.location.assign(result.dispatch.whatsapp_url)
-      toast.success(
-        __(
-          'Offer recorded and WhatsApp opened with the selected unit details.',
-        ),
-      )
-    } else {
-      toast.success(
-        __('Action result saved. The lead workflow has been recalculated.'),
-      )
-    }
-    await continueImmediateSuccessor(
-      result?.successor_action,
-      values.next_action,
-    )
-  } catch (err) {
-    dispatchWindow?.close()
-    toast.error(
-      err.messages?.[0] || err.message || __('Could not save action result'),
-    )
-  }
-}
-
-function actionNeedsNextAction(action, values) {
-  if (values.outcome === 'Rescheduled') return false
-  if (
-    action.action_type === 'Call' &&
-    action.purpose === 'Initial Qualification'
-  ) {
-    return (
-      values.contact_result !== 'Answered' ||
-      values.qualification === 'Interested'
-    )
-  }
-  return actionContext.data?.qualification === 'Interested'
-}
-
-function createClientRequestId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
-  return `lead-action-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-async function collectActionResult(action) {
-  const fields = actionResultFields(action)
-  const values = await renderFieldLayoutDialog({
-    title: __('Complete {0}', [action.action_type]),
-    size: 'lg',
-    fields,
-    submitLabel: __('Save Result'),
-  })
-  return values || null
-}
-
-function actionResultFields(action) {
-  if (action.action_type === 'Call') {
-    const fields = [
-      {
-        fieldname: 'contact_result',
-        fieldtype: 'Select',
-        label: __('Contact Result'),
-        options: '\nAnswered\nNo Answer\nWrong Number\nInvalid / Disconnected',
-        reqd: 1,
-      },
-    ]
-    if (action.purpose === 'Initial Qualification') {
-      fields.push(
-        {
-          fieldname: 'qualification',
-          fieldtype: 'Select',
-          label: __('Qualification Outcome'),
-          options: '\nInterested\nNot Interested',
-          depends_on: "eval:doc.contact_result=='Answered'",
-          mandatory_depends_on: "eval:doc.contact_result=='Answered'",
-        },
-        {
-          fieldname: 'closed_reason',
-          fieldtype: 'Small Text',
-          label: __('Reason for Not Interested'),
-          depends_on: "eval:doc.qualification=='Not Interested'",
-          mandatory_depends_on: "eval:doc.qualification=='Not Interested'",
-        },
-      )
-    } else if (action.purpose === 'Offer Follow-up') {
-      fields.push(
-        {
-          fieldname: 'outcome',
-          fieldtype: 'Select',
-          label: __('Offer Follow-up Outcome'),
-          options: '\nViewed\nOffer Accepted\nRejected\nNeeds Alternatives',
-          depends_on: "eval:doc.contact_result=='Answered'",
-          mandatory_depends_on: "eval:doc.contact_result=='Answered'",
-        },
-        ...interestSelectionFields(action, {
-          label: __('Offer interest record'),
-          requiredFor: ['Viewed', 'Offer Accepted', 'Rejected'],
-        }),
-      )
-    } else if (action.purpose === 'Negotiation Follow-up') {
-      fields.push(
-        {
-          fieldname: 'outcome',
-          fieldtype: 'Select',
-          label: __('Negotiation Outcome'),
-          options: '\nContinuing\nTerms Changed\nAccepted\nDeclined',
-          reqd: 1,
-        },
-        ...interestSelectionFields(action, {
-          label: __('Negotiating interest record'),
-        }),
-      )
-    } else {
-      fields.push({
-        fieldname: 'outcome',
-        fieldtype: 'Select',
-        label: __('Follow-up Outcome'),
-        options: '\nCompleted\nNeeds Callback\nConfirmed\nCancelled',
-        reqd: 1,
-      })
-    }
-    fields.push({
-      fieldname: 'result_note',
-      fieldtype: 'Small Text',
-      label: __('Result Note'),
-    })
-    return fields
-  }
-
-  if (action.action_type === 'Meeting') {
-    return [
-      {
-        fieldname: 'outcome',
-        fieldtype: 'Select',
-        label: __('Meeting Outcome'),
-        options: '\nDone\nNo Show\nCancelled\nRescheduled',
-        reqd: 1,
-      },
-      {
-        fieldname: 'result_note',
-        fieldtype: 'Small Text',
-        label: __('Meeting Result Note'),
-        depends_on: "eval:doc.outcome=='Done'",
-        mandatory_depends_on: "eval:doc.outcome=='Done'",
-      },
-      {
-        fieldname: 'closed_reason',
-        fieldtype: 'Small Text',
-        label: __('No Show / Cancellation Reason'),
-        depends_on: "eval:['No Show','Cancelled'].includes(doc.outcome)",
-        mandatory_depends_on:
-          "eval:['No Show','Cancelled'].includes(doc.outcome)",
-      },
-      {
-        fieldname: 'reschedule_to',
-        fieldtype: 'Datetime',
-        label: __('Reschedule To'),
-        depends_on: "eval:doc.outcome=='Rescheduled'",
-        mandatory_depends_on: "eval:doc.outcome=='Rescheduled'",
-      },
-    ]
-  }
-
-  if (action.action_type === 'Showing') {
-    return [
-      {
-        fieldname: 'outcome',
-        fieldtype: 'Select',
-        label: __('Showing Outcome'),
-        options:
-          '\nCompleted\nBuyer No Show\nSeller/Unit Unavailable\nCancelled\nRescheduled',
-        reqd: 1,
-      },
-      {
-        fieldname: 'unit_outcome',
-        fieldtype: 'Select',
-        label: __('Unit Outcome'),
-        options: '\nInterested\nConsidering\nRejected\nNo Feedback',
-        depends_on: "eval:doc.outcome=='Completed'",
-        mandatory_depends_on: "eval:doc.outcome=='Completed'",
-      },
-      {
-        fieldname: 'result_note',
-        fieldtype: 'Small Text',
-        label: __('Showing Note'),
-      },
-      {
-        fieldname: 'closed_reason',
-        fieldtype: 'Small Text',
-        label: __('Reason'),
-        depends_on:
-          "eval:['Buyer No Show','Seller/Unit Unavailable','Cancelled'].includes(doc.outcome)",
-        mandatory_depends_on:
-          "eval:['Buyer No Show','Seller/Unit Unavailable','Cancelled'].includes(doc.outcome)",
-      },
-      {
-        fieldname: 'reschedule_to',
-        fieldtype: 'Datetime',
-        label: __('Reschedule To'),
-        depends_on: "eval:doc.outcome=='Rescheduled'",
-        mandatory_depends_on: "eval:doc.outcome=='Rescheduled'",
-      },
-    ]
-  }
-
-  if (action.action_type === 'Send Offer') {
-    return [
-      {
-        fieldname: 'result_note',
-        fieldtype: 'Small Text',
-        label: __('WhatsApp Offer Message'),
-        description: __(
-          'The selected units, prices, projects and locations will be appended automatically.',
-        ),
-        reqd: 1,
-      },
-    ]
-  }
-
-  return [
-    {
-      fieldname: 'outcome',
-      fieldtype: 'Select',
-      label: __('Negotiation Outcome'),
-      options: '\nContinuing\nTerms Changed\nAccepted\nDeclined',
-      reqd: 1,
-    },
-    ...interestSelectionFields(action, {
-      label: __('Negotiating interest record'),
-    }),
-    {
-      fieldname: 'result_note',
-      fieldtype: 'Small Text',
-      label: __('Result Note'),
-    },
-  ]
-}
-
-function scopedInterestRows(action) {
-  const contextRows = actionContext.data?.interest_rows || []
-  const scopedNames = action?.interest_rows || []
-  if (!scopedNames.length) return contextRows
-  return contextRows.filter((row) => scopedNames.includes(row.name))
-}
-
-function interestSelectionFields(action, { label, requiredFor = null }) {
-  const rows = scopedInterestRows(action)
-  const outcomeExpression = requiredFor
-    ? `eval:${JSON.stringify(requiredFor)}.includes(doc.outcome)`
-    : null
-  return rows.map((row, index) => ({
-    fieldname: `interest_row_${index}`,
-    fieldtype: 'Check',
-    label: `${label}: ${row.label}`,
-    default: rows.length === 1 ? 1 : 0,
-    depends_on: outcomeExpression || undefined,
-  }))
-}
-
-function normalizeActionResult(action, values) {
-  if (!action?.action_type) {
-    toast.error(
-      __('The current action could not be loaded. Refresh the Lead and retry.'),
-    )
-    return null
-  }
-  const result = { ...values }
-  if (action.action_type === 'Send Offer') result.outcome = 'Dispatched'
-  const rows = scopedInterestRows(action)
-  const selectedRows = rows
-    .filter((_row, index) => Boolean(values[`interest_row_${index}`]))
-    .map((row) => row.name)
-  Object.keys(result)
-    .filter((fieldname) => fieldname.startsWith('interest_row_'))
-    .forEach((fieldname) => delete result[fieldname])
-  if (selectedRows.length) result.interest_rows = selectedRows
-  return result
-}
-
-async function collectNextAction(action, values) {
-  const definitions = nextActionDefinitions(action, values)
-  if (!definitions.length) {
-    toast.error(
-      __('No next action is permitted in the current workflow context.'),
-    )
-    return null
-  }
-
-  const validDefinitions = definitions.filter(
-    (definition) => definition?.action_type,
-  )
-  const options = validDefinitions.map(actionOptionLabel)
-  const selector = await renderFieldLayoutDialog({
-    title: __('Required Next Action'),
-    fields: [
-      {
-        fieldname: 'selection',
-        fieldtype: 'Select',
-        label: __('Choose the next action'),
-        options: `\n${options.join('\n')}`,
-        reqd: 1,
-      },
-    ],
-    submitLabel: __('Continue'),
-  })
-  if (!selector?.selection) return null
-  const definition = validDefinitions[options.indexOf(selector.selection)]
-  if (!definition) {
-    toast.error(__('The selected next action is no longer available.'))
-    return null
-  }
-  return collectActionPlan(definition, action, values)
-}
-
-function nextActionDefinitions(action, values) {
-  if (
-    action.action_type === 'Call' &&
-    action.purpose === 'Initial Qualification' &&
-    values.contact_result === 'Answered' &&
-    values.qualification === 'Interested'
-  ) {
-    return derivePolicyActions(simulateInterestFacts(action, values))
-  }
-  if (
-    values.qualification === 'Interested' ||
-    actionContext.data?.qualification === 'Interested'
-  ) {
-    return derivePolicyActions(simulateInterestFacts(action, values))
-  }
-  return actionContext.data?.allowed_next_actions || []
-}
-
-function simulateInterestFacts(action, values) {
-  const selected = new Set(values.interest_rows || action.interest_rows || [])
-  return (actionContext.data?.interest_rows || [])
-    .map((row) => {
-      const simulated = { ...row }
-      if (!selected.has(row.name)) return simulated
-
-      if (
-        action.action_type === 'Send Offer' &&
-        values.outcome === 'Dispatched'
-      ) {
-        simulated.offer_sent = 1
-        simulated.proposal_status = 'Sent'
-      }
-      if (
-        action.action_type === 'Call' &&
-        action.purpose === 'Offer Follow-up'
-      ) {
-        if (values.outcome === 'Offer Accepted')
-          simulated.proposal_status = 'Offer Accepted'
-        if (values.outcome === 'Rejected') simulated.rejected = true
-      }
-      if (action.action_type === 'Showing' && values.outcome === 'Completed') {
-        if (values.unit_outcome === 'Interested')
-          simulated.proposal_status = 'Offer Accepted'
-        if (values.unit_outcome === 'Rejected') simulated.rejected = true
-      }
-      if (action.action_type === 'Negotiation Follow-up') {
-        if (values.outcome === 'Declined') simulated.rejected = true
-        else simulated.proposal_status = 'Offer Accepted'
-      }
-      return simulated
-    })
-    .filter((row) => !row.rejected)
-}
-
-function derivePolicyActions(rows) {
-  const inventoryRows = rows.filter((row) => row.unit)
-  const unsentRows = inventoryRows.filter((row) => !row.offer_sent)
-  const sentRows = inventoryRows.filter(
-    (row) => row.offer_sent && row.proposal_status !== 'Rejected',
-  )
-  const negotiatingRows = sentRows.filter(
-    (row) => row.proposal_status === 'Offer Accepted',
-  )
-  const definitions = [
-    {
-      action_type: 'Add Interest',
-      purpose: 'Requirements Discovery',
-      label: __('Add or update buyer interest'),
-      requires_interest_rows: false,
-      requires_unit: false,
-    },
-    {
-      action_type: 'Call',
-      purpose: 'General Follow-up',
-      label: __('Follow up by call'),
-      requires_interest_rows: false,
-      requires_unit: false,
-    },
-    {
-      action_type: 'Meeting',
-      purpose: 'Discovery Meeting',
-      label: __('Hold or schedule a discovery meeting'),
-      requires_interest_rows: false,
-      requires_unit: false,
-    },
-  ]
-  if (unsentRows.length) {
-    definitions.push({
-      action_type: 'Send Offer',
-      purpose: 'Offer Follow-up',
-      label: __('Send selected unit offers by WhatsApp'),
-      requires_interest_rows: true,
-      requires_unit: false,
-      interest_row_names: unsentRows.map((row) => row.name),
-    })
-  }
-  if (sentRows.length) {
-    definitions.push({
-      action_type: 'Call',
-      purpose: 'Offer Follow-up',
-      label: __('Follow up on sent offers'),
-      requires_interest_rows: true,
-      requires_unit: false,
-      interest_row_names: sentRows.map((row) => row.name),
-    })
-  }
-  if (negotiatingRows.length) {
-    const rowNames = negotiatingRows.map((row) => row.name)
-    definitions.push(
-      {
-        action_type: 'Negotiation Follow-up',
-        purpose: 'Negotiation Follow-up',
-        label: __('Record negotiation follow-up'),
-        requires_interest_rows: true,
-        requires_unit: false,
-        interest_row_names: rowNames,
-      },
-      {
-        action_type: 'Showing',
-        purpose: 'Showing Confirmation',
-        label: __('Hold or schedule a unit showing'),
-        requires_interest_rows: true,
-        requires_unit: true,
-        interest_row_names: rowNames,
-      },
-    )
-  }
-  return definitions
-}
-
-function actionOptionLabel(definition) {
-  if (!definition?.action_type) return ''
-  return `${definition.action_type} — ${definition.purpose || ''}`
-}
-
-function normalizeActionPlanValues(rows, values) {
-  const result = { ...values }
-  const selectedRows = rows
-    .filter((_row, index) => Boolean(values[`interest_row_${index}`]))
-    .map((row) => row.name)
-  Object.keys(result)
-    .filter((fieldname) => fieldname.startsWith('interest_row_'))
-    .forEach((fieldname) => delete result[fieldname])
-  if (selectedRows.length) result.interest_rows = selectedRows
-  return result
-}
-
-async function collectActionPlan(definition, { forceImmediate = false } = {}) {
-  if (!definition?.action_type) {
-    toast.error(
-      __('The selected action is no longer available. Refresh and try again.'),
-    )
-    return null
-  }
-  const alwaysImmediate = definition.action_type === 'Add Interest'
-  const requiresRows =
-    definition.requires_interest_rows || definition.action_type === 'Showing'
-  const planScope = definition.interest_row_names?.length
-    ? { interest_rows: definition.interest_row_names }
-    : null
-  const planRows = scopedInterestRows(planScope)
-  const fields = []
-
-  if (!alwaysImmediate && !forceImmediate) {
-    fields.push(
-      {
-        fieldname: 'execution_timing',
-        fieldtype: 'Select',
-        label: __('When should this action happen?'),
-        options: '\nDo Now\nSchedule for Later',
-        default: 'Do Now',
-        reqd: 1,
-      },
-      {
-        fieldname: 'scheduled_start',
-        fieldtype: 'Datetime',
-        label: __('Scheduled Date & Time'),
-        depends_on: "eval:doc.execution_timing=='Schedule for Later'",
-        mandatory_depends_on: "eval:doc.execution_timing=='Schedule for Later'",
-      },
-    )
-  }
-  if (definition.action_type === 'Showing') {
-    fields.push({
-      fieldname: 'showing_interest_selection',
-      fieldtype: 'Select',
-      label: __('Showing Unit Interest'),
-      options: `\n${planRows.map((row) => row.label).join('\n')}`,
-      reqd: 1,
-    })
-  } else if (definition.requires_unit) {
-    fields.push({
-      fieldname: 'unit',
-      fieldtype: 'Link',
-      label: __('Related Unit'),
-      options: 'Real Estate Unit',
-      reqd: 1,
-    })
-  }
-  if (requiresRows && definition.action_type !== 'Showing') {
-    fields.push(
-      ...interestSelectionFields(planScope, {
-        label: __('Scope interest record'),
-      }),
-    )
-  }
-  fields.push({
-    fieldname: 'notes',
-    fieldtype: 'Small Text',
-    label: __('Planning Notes'),
-  })
-
-  const values = await renderFieldLayoutDialog({
-    title: definition.label || __('Next Action'),
-    size: 'lg',
-    defaults: {
-      execution_timing: 'Do Now',
-    },
-    fields,
-    submitLabel:
-      forceImmediate || alwaysImmediate ? __('Do Now') : __('Continue'),
-  })
-  if (!values) return null
-
-  const normalized = normalizeActionPlanValues(planRows, values)
-  const executeNow =
-    forceImmediate ||
-    alwaysImmediate ||
-    normalized.execution_timing !== 'Schedule for Later'
-  delete normalized.execution_timing
-  if (definition.action_type === 'Showing') {
-    const selectedRow = planRows.find(
-      (row) => row.label === normalized.showing_interest_selection,
-    )
-    delete normalized.showing_interest_selection
-    if (!selectedRow?.unit) {
-      toast.error(__('Select one inventory-unit interest for the showing.'))
-      return null
-    }
-    normalized.interest_rows = [selectedRow.name]
-    normalized.unit = selectedRow.unit
-  }
-  if (requiresRows && !normalized.interest_rows?.length) {
-    toast.error(__('Select at least one scoped interest record.'))
-    return null
-  }
-  return {
-    action_type: definition.action_type,
-    purpose: definition.purpose,
-    scheduled_start: executeNow
-      ? frappeNowDateTime()
-      : normalized.scheduled_start,
-    execute_now: executeNow,
-    unit: normalized.unit || null,
-    interest_rows: normalized.interest_rows || [],
-    notes: normalized.notes || null,
-  }
-}
-
-function frappeNowDateTime() {
-  const now = new Date()
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
-}
-
 function openInterestWorkflow() {
   const action = actionContext.data?.current_action
   if (action?.action_type === 'Add Interest') {
@@ -1745,46 +1068,16 @@ function openInterestWorkflow() {
   openUnifiedAction(definition)
 }
 
-async function completeInterestAction(action) {
-  const result = await openInterestDeterminationDialog()
-  if (!result) return
-  await actionContext.reload()
-  const values = { outcome: result }
-  const nextAction = await collectNextAction(action, values)
-  if (!nextAction) return
-  values.next_action = nextAction
-  try {
-    const completion = await call(
-      'real_estate_crm_customs.api.complete_lead_action',
-      {
-        lead: props.leadId,
-        action_name: action.name,
-        result_data: JSON.stringify(values),
-        client_request_id: createClientRequestId(),
-        expected_modified: action.modified,
-      },
-    )
-    reloadActionWeb()
-    toast.success(__('Interest action completed and next action created.'))
-    await continueImmediateSuccessor(completion?.successor_action, nextAction)
-  } catch (err) {
-    toast.error(
-      err.messages?.[0] ||
-        err.message ||
-        __('Could not complete interest action'),
-    )
-  }
-}
-
 // ---------------------------------------------------------------------------
 // 4. Interest Determination Dialog
 // ---------------------------------------------------------------------------
 function selectInterestUnits(
   category,
-  { currentUnit = '', criteria = {}, multiple = true } = {},
+  { interest = '', currentUnit = '', criteria = {}, multiple = true } = {},
 ) {
   if (interestUnitResolver.value) interestUnitResolver.value(null)
   interestUnitCategory.value = category
+  interestUnitInterest.value = interest || ''
   interestUnitCurrent.value = currentUnit || ''
   interestUnitCriteria.value = criteria || {}
   interestUnitSelectionMode.value = multiple ? 'multiple' : 'single'
@@ -1806,50 +1099,29 @@ function cancelInterestUnitSelection() {
   if (resolve) resolve(null)
 }
 
-async function chooseInterestCategory(defaults = {}) {
-  return renderFieldLayoutDialog({
-    title: defaults.editing ? __('Edit Interest') : __('Add Interest'),
-    defaults: {
-      interest_category: defaults.interest_category || '',
-      unit_interest_status: defaults.unit_interest_status || 'Active',
-    },
-    fields: [
-      {
-        fieldname: 'interest_category',
-        fieldtype: 'Select',
-        label: __('Interest Category'),
-        options: '\nResale\nPrimary\nBrokerage Request\nInternational',
-        reqd: 1,
-      },
-      ...(defaults.editing
-        ? [
-            {
-              fieldname: 'unit_interest_status',
-              fieldtype: 'Select',
-              label: __('Interest Status'),
-              options: '\nActive\nLost Interest',
-              reqd: 1,
-            },
-          ]
-        : []),
-    ],
-    submitLabel: __('Continue'),
+function openUnitRecord(unit) {
+  if (!unit) return
+  showDoctypeModal({
+    name: unit,
+    doctype: 'Real Estate Unit',
+    title: __('Real Estate Unit'),
+    callbacks: { afterUpdate: reloadActionWeb },
   })
 }
 
 function requestInterestFields(category, { editing = false } = {}) {
   const requestFields = [
     {
-      fieldname: 'preferred_area',
-      fieldtype: 'Data',
-      label: __('Preferred Location / Area'),
+      fieldname: 'preferred_destination',
+      fieldtype: 'Link',
+      label: __('Preferred Destination'),
+      options: 'Real Estate Destination',
     },
     {
       fieldname: 'preferred_unit_type',
-      fieldtype: 'Select',
+      fieldtype: 'Link',
       label: __('Preferred Unit Type'),
-      options:
-        '\nApartment\nDuplex\nTownhouse\nVilla\nChalet\nStudio\nPenthouse',
+      options: 'Real Estate Unit Type',
     },
     {
       fieldname: 'buyer_budget',
@@ -1921,24 +1193,6 @@ async function loadInterestRequirementOptions(category) {
 
 async function collectInventoryInterestRequirements(category, defaults = {}) {
   const options = await loadInterestRequirementOptions(category)
-  const locationOptions = Array.from(
-    new Set(
-      [
-        defaults.preferred_area || doc.value.preferred_area,
-        ...(options.locations || []),
-      ].filter(Boolean),
-    ),
-  )
-  const unitTypeOptions = Array.from(
-    new Set(
-      [
-        defaults.preferred_unit_type || doc.value.preferred_unit_type,
-        ...(options.unit_types?.length
-          ? options.unit_types
-          : ['Apartment', 'Duplex', 'Villa', 'Chalet', 'Penthouse']),
-      ].filter(Boolean),
-    ),
-  )
   const finishingOptions = Array.from(
     new Set(
       [
@@ -1959,7 +1213,8 @@ async function collectInventoryInterestRequirements(category, defaults = {}) {
     title: __('Buyer Requirements — {0}', [category]),
     size: 'lg',
     defaults: {
-      preferred_area: defaults.preferred_area || doc.value.preferred_area,
+      preferred_destination:
+        defaults.preferred_destination || doc.value.preferred_destination,
       preferred_unit_type:
         defaults.preferred_unit_type || doc.value.preferred_unit_type,
       preferred_developer:
@@ -1974,19 +1229,17 @@ async function collectInventoryInterestRequirements(category, defaults = {}) {
     },
     fields: [
       {
-        fieldname: 'preferred_area',
-        fieldtype: locationOptions.length ? 'Select' : 'Data',
-        label: __('Preferred Location / Area'),
-        options: locationOptions.length
-          ? `\n${locationOptions.join('\n')}`
-          : null,
+        fieldname: 'preferred_destination',
+        fieldtype: 'Link',
+        label: __('Preferred Destination'),
+        options: 'Real Estate Destination',
         reqd: 1,
       },
       {
         fieldname: 'preferred_unit_type',
-        fieldtype: 'Select',
+        fieldtype: 'Link',
         label: __('Preferred Unit Type'),
-        options: `\n${unitTypeOptions.join('\n')}`,
+        options: 'Real Estate Unit Type',
         reqd: 1,
       },
       {
@@ -1998,7 +1251,7 @@ async function collectInventoryInterestRequirements(category, defaults = {}) {
       {
         fieldname: 'preferred_compound',
         fieldtype: 'Link',
-        label: __('Preferred Project'),
+        label: __('Preferred Compound'),
         options: 'Real Estate Project',
       },
       {
@@ -2040,144 +1293,6 @@ async function collectRequestInterest(
   })
 }
 
-async function openInterestDeterminationDialog() {
-  const existingInterests = visibleLinkedPropertyRows.value.filter(
-    (row) => row.interest_row_name,
-  )
-  if (existingInterests.length) {
-    const choice = await renderFieldLayoutDialog({
-      title: __('Interest Already Recorded'),
-      fields: [
-        {
-          fieldname: 'action',
-          fieldtype: 'Select',
-          label: __('Choose how to continue'),
-          options: '\nAdd New Interest\nEdit Existing Interest',
-          reqd: 1,
-        },
-      ],
-      submitLabel: __('Continue'),
-    })
-    if (!choice?.action) return null
-    if (choice.action === 'Edit Existing Interest') {
-      return (await openExistingInterestEditor()) ? 'Updated' : null
-    }
-  }
-
-  const categoryValues = await chooseInterestCategory()
-  const category = categoryValues?.interest_category
-  if (!category) return null
-
-  let interestValues
-  if (['Resale', 'Primary'].includes(category)) {
-    const requirements = await collectInventoryInterestRequirements(category)
-    if (!requirements) return null
-    const selectedUnits = await selectInterestUnits(category, {
-      criteria: requirements,
-      multiple: true,
-    })
-    if (!selectedUnits?.length) return null
-    interestValues = {
-      ...requirements,
-      units: selectedUnits.map((unit) => unit.name),
-    }
-  } else {
-    interestValues = await collectRequestInterest(category)
-    if (!interestValues) return null
-  }
-
-  try {
-    const interestData = {
-      interest_category: category,
-      units: interestValues.units || [],
-      request_notes: interestValues.request_notes || null,
-      international_type: interestValues.international_type || null,
-      international_country: interestValues.international_country || null,
-      international_details: interestValues.international_details || null,
-      preferred_area: interestValues.preferred_area || null,
-      preferred_unit_type: interestValues.preferred_unit_type || null,
-      preferred_developer: interestValues.preferred_developer || null,
-      preferred_compound: interestValues.preferred_compound || null,
-      preferred_finishing_type: interestValues.preferred_finishing_type || null,
-      preferred_delivery_time: interestValues.preferred_delivery_time || null,
-      buyer_budget: interestValues.buyer_budget || null,
-    }
-    const result = await call(
-      'real_estate_crm_customs.api.record_interest_determination',
-      {
-        lead: props.leadId,
-        interested: 1,
-        is_primary_buyer: category === 'Primary' ? 1 : 0,
-        interest_data: JSON.stringify(interestData),
-      },
-    )
-    updateLeadActionState(result)
-    reloadActionWeb()
-    toast.success(
-      ['Resale', 'Primary'].includes(category)
-        ? __('Selected properties added to the lead interests.')
-        : __('Interest request added successfully.'),
-    )
-    return 'Added'
-  } catch (err) {
-    toast.error(
-      err.messages?.[0] || err.message || __('Error recording interest'),
-    )
-    return null
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 5. Dynamic planning — only policy-approved actions can be created
-// ---------------------------------------------------------------------------
-async function openNextActionDialog(
-  definition = null,
-  { forceImmediate = false } = {},
-) {
-  const contextDefinition =
-    definition && typeof definition === 'object' ? definition : null
-  const definitions = actionContext.data?.allowed_actions || []
-  const selectedDefinition = contextDefinition || definitions[0]
-  if (!selectedDefinition) {
-    toast.info(
-      __('Complete, reschedule, or cancel the current required action first.'),
-    )
-    return
-  }
-
-  const actionPlan = await collectActionPlan(selectedDefinition, {
-    forceImmediate,
-  })
-  if (!actionPlan) return
-
-  try {
-    const result = await call('real_estate_crm_customs.api.plan_lead_action', {
-      lead: props.leadId,
-      action_type: actionPlan.action_type,
-      purpose: actionPlan.purpose,
-      scheduled_start: actionPlan.scheduled_start,
-      notes: actionPlan.notes,
-      unit: actionPlan.unit,
-      interest_rows: JSON.stringify(actionPlan.interest_rows || []),
-      execute_now: actionPlan.execute_now ? 1 : 0,
-    })
-    await actionContext.reload()
-    if (actionPlan.execute_now) {
-      await executeDynamicAction(result?.action)
-    } else {
-      await smartEvents.value?.reload?.()
-      activities.value?.all_activities?.reload?.()
-      toast.success(
-        result?.event
-          ? __('Action scheduled and added to Events: {0}', [result.event])
-          : __('Workflow action scheduled and added to the Lead calendar.'),
-      )
-    }
-  } catch (err) {
-    toast.error(err.messages?.[0] || err.message || __('Could not plan action'))
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Interest row editing and deletion approval
 // ---------------------------------------------------------------------------
@@ -2217,6 +1332,7 @@ async function editInterestRecord(row) {
   }
   if (['Resale', 'Primary'].includes(category)) {
     const requirements = await collectInventoryInterestRequirements(category, {
+      preferred_destination: row.requested_destination,
       preferred_area: row.requested_area,
       preferred_unit_type: row.requested_unit_type,
       preferred_developer: row.requested_developer,
@@ -2235,6 +1351,7 @@ async function editInterestRecord(row) {
     } else {
       const currentUnit = row.unit || ''
       const selectedUnit = await selectInterestUnits(category, {
+        interest: row.name,
         currentUnit,
         criteria: requirements,
         multiple: false,
@@ -2251,6 +1368,8 @@ async function editInterestRecord(row) {
         international_type: row.international_type,
         international_country: row.international_country,
         international_details: row.international_details,
+        preferred_destination:
+          row.requested_destination || doc.value.preferred_destination,
         preferred_area: doc.value.preferred_area,
         preferred_unit_type: doc.value.preferred_unit_type,
         buyer_budget: doc.value.buyer_budget,
@@ -2404,8 +1523,7 @@ async function editBuyerInterestPreferences() {
     title: __('Edit Interest Details'),
     size: 'xl',
     defaults: {
-      area_unit: doc.value.area_unit || 'Sq M',
-      preferred_area: doc.value.preferred_area,
+      preferred_destination: doc.value.preferred_destination,
       preferred_unit_type: doc.value.preferred_unit_type,
       preferred_developer: doc.value.preferred_developer,
       preferred_compound: doc.value.preferred_compound,
@@ -2415,22 +1533,16 @@ async function editBuyerInterestPreferences() {
     },
     fields: [
       {
-        fieldname: 'preferred_area',
-        fieldtype: 'Data',
-        label: __('Preferred Location / Area'),
-      },
-      {
-        fieldname: 'area_unit',
-        fieldtype: 'Select',
-        label: __('Area Unit'),
-        options: 'Sq M\nSq Ft',
+        fieldname: 'preferred_destination',
+        fieldtype: 'Link',
+        label: __('Preferred Destination'),
+        options: 'Real Estate Destination',
       },
       {
         fieldname: 'preferred_unit_type',
-        fieldtype: 'Select',
+        fieldtype: 'Link',
         label: __('Unit Type'),
-        options:
-          '\nApartment\nDuplex\nTownhouse\nVilla\nChalet\nStudio\nPenthouse',
+        options: 'Real Estate Unit Type',
       },
       {
         fieldname: 'preferred_developer',
@@ -2441,7 +1553,7 @@ async function editBuyerInterestPreferences() {
       {
         fieldname: 'preferred_compound',
         fieldtype: 'Link',
-        label: __('Compound / Project'),
+        label: __('Preferred Compound'),
         options: 'Real Estate Project',
       },
       {
@@ -2498,7 +1610,7 @@ async function addSellerProperty() {
       {
         fieldname: 'project',
         fieldtype: 'Link',
-        label: __('Project'),
+        label: __('Compound'),
         options: 'Real Estate Project',
         reqd: 1,
       },
@@ -2509,21 +1621,90 @@ async function addSellerProperty() {
         reqd: 1,
       },
       {
-        fieldname: 'price',
+        fieldname: 'physical_unit_type',
+        fieldtype: 'Link',
+        label: __('Unit Type'),
+        options: 'Real Estate Unit Type',
+        reqd: 1,
+      },
+      {
+        fieldname: 'finishing_type',
+        fieldtype: 'Select',
+        label: __('Finishing Type'),
+        options:
+          '\nCore & Shell\nSemi-Finished\nFully Finished\nUltra Super Lux',
+        reqd: 1,
+      },
+      {
+        fieldname: 'delivery_date',
+        fieldtype: 'Date',
+        label: __('Delivery Date'),
+        reqd: 1,
+      },
+      {
+        fieldname: 'bedrooms',
+        fieldtype: 'Int',
+        label: __('Bedrooms'),
+        default: 0,
+      },
+      {
+        fieldname: 'bathrooms',
+        fieldtype: 'Int',
+        label: __('Bathrooms'),
+        default: 0,
+      },
+      {
+        fieldname: 'bua',
+        fieldtype: 'Float',
+        label: __('BUA'),
+      },
+      {
+        fieldname: 'paid',
         fieldtype: 'Currency',
-        label: __('Target Asking Price'),
+        label: __('Paid'),
+      },
+      {
+        fieldname: 'over_price',
+        fieldtype: 'Currency',
+        label: __('Over Price'),
+      },
+      {
+        fieldname: 'over_is_gross',
+        fieldtype: 'Check',
+        label: __('Over Is Gross'),
+      },
+      {
+        fieldname: 'remaining',
+        fieldtype: 'Currency',
+        label: __('Remaining'),
       },
     ],
     submitLabel: __('Create Property'),
   })
-  if (!values?.project || !values?.unit_number) return
+  if (
+    !values?.project ||
+    !values?.unit_number ||
+    !values?.physical_unit_type ||
+    !values?.finishing_type ||
+    !values?.delivery_date
+  )
+    return
 
   try {
     await call('real_estate_crm_customs.api.create_resale_unit', {
       owner_lead: props.leadId,
       project: values.project,
       unit_number: values.unit_number,
-      price: values.price || null,
+      physical_unit_type: values.physical_unit_type,
+      finishing_type: values.finishing_type,
+      delivery_date: values.delivery_date,
+      bedrooms: values.bedrooms || 0,
+      bathrooms: values.bathrooms || 0,
+      bua: values.bua || null,
+      paid: values.paid || null,
+      over_price: values.over_price || null,
+      over_is_gross: values.over_is_gross ? 1 : 0,
+      remaining: values.remaining || null,
     })
     reloadActionWeb()
     toast.success(__('Seller property created and linked to this lead.'))

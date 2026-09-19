@@ -15,7 +15,7 @@
         <p class="mt-1 text-sm text-ink-gray-6">
           {{
             __(
-              'Compare properties by location, project, type, price and finishing. SKU is shown only as a reference.',
+              'Compare properties by destination, compound, type, total gross and finishing. SKU is shown only as a reference.',
             )
           }}
         </p>
@@ -80,24 +80,12 @@
                 @keyup.enter="fetchUnits"
               />
             </label>
-            <label
-              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
-            >
-              {{ __('Location') }}
-              <select
-                v-model="filters.location"
-                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
-              >
-                <option value="">{{ __('All Locations') }}</option>
-                <option
-                  v-for="location in filterOptions.locations"
-                  :key="location"
-                  :value="location"
-                >
-                  {{ location }}
-                </option>
-              </select>
-            </label>
+            <LinkControl
+              v-model="filters.destination"
+              doctype="Real Estate Destination"
+              :label="__('Destination')"
+              :placeholder="__('Select a destination')"
+            />
             <label
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
             >
@@ -119,8 +107,8 @@
             <LinkControl
               v-model="filters.project"
               doctype="Real Estate Project"
-              :label="__('Project')"
-              :placeholder="__('Select a project')"
+              :label="__('Compound')"
+              :placeholder="__('Select a compound')"
             />
             <LinkControl
               v-model="filters.developer"
@@ -233,10 +221,11 @@
           v-else
           class="grid max-h-[460px] grid-cols-1 gap-3 overflow-auto pr-1 lg:grid-cols-2"
         >
-          <button
+          <div
             v-for="unit in units"
             :key="unit.name"
-            type="button"
+            role="button"
+            tabindex="0"
             class="rounded-xl border p-4 text-left transition duration-150 hover:border-outline-gray-4 hover:bg-surface-gray-1 active:scale-[0.99]"
             :class="
               isSelected(unit)
@@ -244,15 +233,21 @@
                 : 'border-outline-gray-2 bg-surface-white'
             "
             @click="toggleUnit(unit)"
+            @keydown.enter.prevent="toggleUnit(unit)"
           >
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <p class="truncate text-base font-semibold text-ink-gray-9">
-                  {{ unit.location || __('Location not set') }}
+                  {{
+                    unit.destination_label ||
+                    unit.destination ||
+                    unit.location ||
+                    __('Destination not set')
+                  }}
                 </p>
                 <p class="mt-0.5 truncate text-sm font-medium text-ink-gray-7">
                   {{
-                    unit.project_label || unit.project || __('Project not set')
+                    unit.project_label || unit.project || __('Compound not set')
                   }}
                 </p>
               </div>
@@ -267,16 +262,25 @@
                   {{ unit.match_score }}% {{ __(unit.match_level) }}
                 </span>
                 <p class="mt-1 text-base font-semibold text-ink-gray-9">
-                  {{ formatPrice(unit.price) }}
+                  {{
+                    formatPrice(
+                      unit.effective_price ?? unit.total_gross ?? unit.price,
+                    )
+                  }}
                 </p>
-                <p class="text-xs text-ink-gray-5">{{ __('Asking price') }}</p>
+                <p class="text-xs text-ink-gray-5">
+                  {{ __(unit.price_source || 'Total Gross') }}
+                </p>
               </div>
             </div>
 
             <div
               class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-surface-gray-1 p-3 text-sm"
             >
-              <UnitFact :label="__('Unit Type')" :value="unit.unit_type" />
+              <UnitFact
+                :label="__('Unit Type')"
+                :value="unit.physical_unit_type || unit.unit_type"
+              />
               <UnitFact :label="__('Developer')" :value="unit.developer" />
               <UnitFact :label="__('Finishing')" :value="unit.finishing_type" />
               <UnitFact
@@ -284,10 +288,12 @@
                 :value="displayFloor(unit.floor)"
               />
               <UnitFact
-                :label="__('Project Status')"
+                :label="__('Compound Status')"
                 :value="unit.project_status"
               />
               <UnitFact :label="__('Availability')" :value="unit.status" />
+              <UnitFact :label="__('Bedrooms')" :value="unit.bedrooms" />
+              <UnitFact :label="__('Bathrooms')" :value="unit.bathrooms" />
             </div>
 
             <div
@@ -312,20 +318,28 @@
 
             <div class="mt-3 flex items-center justify-between gap-3">
               <span class="text-xs text-ink-gray-5">
-                {{ __('Reference') }}: {{ unit.sku || unit.name }}
+                {{ __('Reference') }}:
+                {{ unit.unit_number || unit.sku || unit.name }}
               </span>
-              <span
-                class="rounded-full px-2 py-1 text-xs font-medium"
-                :class="
-                  isSelected(unit)
-                    ? 'bg-surface-blue-3 text-ink-white'
-                    : 'bg-surface-gray-2 text-ink-gray-7'
-                "
-              >
-                {{ isSelected(unit) ? __('Selected') : __('Select') }}
-              </span>
+              <div class="flex items-center gap-2">
+                <Button
+                  :label="__('Open Unit')"
+                  variant="ghosted"
+                  @click.stop="openUnit(unit)"
+                />
+                <span
+                  class="rounded-full px-2 py-1 text-xs font-medium"
+                  :class="
+                    isSelected(unit)
+                      ? 'bg-surface-blue-3 text-ink-white'
+                      : 'bg-surface-gray-2 text-ink-gray-7'
+                  "
+                >
+                  {{ isSelected(unit) ? __('Selected') : __('Select') }}
+                </span>
+              </div>
             </div>
-          </button>
+          </div>
         </div>
 
         <div
@@ -362,6 +376,7 @@
 
 <script setup>
 import LinkControl from '@/components/Controls/Link.vue'
+import { useDoctypeModal } from '@/composables/doctypeModal'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { Button, Dialog, call, toast } from 'frappe-ui'
 
@@ -387,8 +402,11 @@ const UnitFact = defineComponent({
   },
 })
 
+const { showModal } = useDoctypeModal()
+
 const props = defineProps({
   leadId: { type: String, required: true },
+  interestId: { type: String, default: '' },
   interestCategory: { type: String, default: 'Resale' },
   includeUnit: { type: String, default: '' },
   initialCriteria: { type: Object, default: () => ({}) },
@@ -413,7 +431,6 @@ const matchProfile = ref({})
 const smartMatchActive = ref(false)
 const strictFilters = ref(false)
 const filterOptions = reactive({
-  locations: [],
   unitTypes: ['Villa', 'Chalet', 'Apartment', 'Duplex', 'Penthouse'],
   finishingTypes: [
     'Core & Shell',
@@ -424,7 +441,7 @@ const filterOptions = reactive({
 })
 const filters = reactive({
   search: '',
-  location: '',
+  destination: '',
   project: '',
   developer: '',
   unitType: '',
@@ -442,8 +459,11 @@ const categoryHint = computed(() =>
 const matchCriteria = computed(() => {
   const profile = matchProfile.value || {}
   return [
-    { label: __('Location'), value: profile.location },
-    { label: __('Project'), value: profile.project },
+    {
+      label: __('Destination'),
+      value: profile.destination || profile.location,
+    },
+    { label: __('Compound'), value: profile.project },
     { label: __('Developer'), value: profile.developer },
     { label: __('Unit Type'), value: profile.unit_type },
     { label: __('Finishing'), value: profile.finishing_type },
@@ -473,6 +493,15 @@ function toggleUnit(unit) {
   else selectedUnits.value.push(unit.name)
 }
 
+function openUnit(unit) {
+  showModal({
+    name: unit.name,
+    doctype: 'Real Estate Unit',
+    title: __('Real Estate Unit'),
+    callbacks: { afterUpdate: () => fetchUnits() },
+  })
+}
+
 function formatPrice(value) {
   if (value === null || value === undefined || value === '') return '—'
   return Number(value).toLocaleString()
@@ -493,7 +522,7 @@ function matchScoreClass(score) {
 function clearFilterValues() {
   Object.assign(filters, {
     search: '',
-    location: '',
+    destination: '',
     project: '',
     developer: '',
     unitType: '',
@@ -504,7 +533,7 @@ function clearFilterValues() {
 }
 
 function applyProfileToFilters(profile) {
-  filters.location = profile.location || ''
+  filters.destination = profile.destination || ''
   filters.project = profile.project || ''
   filters.developer = profile.developer || ''
   filters.unitType = profile.unit_type || ''
@@ -515,7 +544,8 @@ function applyProfileToFilters(profile) {
 
 function applyInitialCriteria() {
   const criteria = props.initialCriteria || {}
-  filters.location = criteria.preferred_area || criteria.location || ''
+  filters.destination =
+    criteria.preferred_destination || criteria.destination || ''
   filters.project = criteria.preferred_compound || criteria.project || ''
   filters.developer = criteria.preferred_developer || criteria.developer || ''
   filters.unitType = criteria.preferred_unit_type || criteria.unit_type || ''
@@ -531,7 +561,6 @@ async function fetchFilterOptions() {
       'real_estate_crm_customs.api.get_property_match_filter_options',
       { interest_category: localCategory.value },
     )
-    filterOptions.locations = result?.locations || []
     if (result?.unit_types?.length) filterOptions.unitTypes = result.unit_types
     if (result?.finishing_types?.length)
       filterOptions.finishingTypes = result.finishing_types
@@ -553,12 +582,13 @@ async function fetchUnits({ hydrateProfile = false } = {}) {
       'real_estate_crm_customs.api.get_smart_matched_units',
       {
         lead: props.leadId,
+        interest: props.interestId || null,
         interest_category: localCategory.value,
         search: filters.search || null,
-        location: filters.location || null,
+        destination: filters.destination || null,
         project: filters.project || null,
         developer: filters.developer || null,
-        unit_type: filters.unitType || null,
+        physical_unit_type: filters.unitType || null,
         finishing_type: filters.finishingType || null,
         min_price: filters.minPrice || null,
         max_price: filters.maxPrice || null,

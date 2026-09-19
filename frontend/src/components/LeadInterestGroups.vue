@@ -32,14 +32,14 @@
           >
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <a
+                <button
                   v-if="row.interest_record_type === 'Inventory Unit'"
-                  :href="unitHref(row.name)"
-                  target="_blank"
+                  type="button"
                   class="font-medium text-ink-blue-4 hover:underline"
+                  @click="openUnit(row.name)"
                 >
                   {{ row.sku || row.name }}
-                </a>
+                </button>
                 <span v-else class="font-medium text-ink-gray-9">{{
                   recordTitle(row)
                 }}</span>
@@ -115,6 +115,9 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useDoctypeModal } from '@/composables/doctypeModal'
+
+const { showModal } = useDoctypeModal()
 
 const props = defineProps({
   rows: { type: Array, default: () => [] },
@@ -172,9 +175,12 @@ function recordDetails(row) {
   if (row.interest_record_type === 'Inventory Unit') {
     return [
       { label: __('Unit'), value: row.name },
-      { label: __('Project'), value: row.project },
+      { label: __('Compound'), value: row.project },
       { label: __('Developer'), value: row.developer },
-      { label: __('Price'), value: row.price },
+      {
+        label: __('Total Gross'),
+        value: row.effective_price ?? row.total_gross ?? row.price,
+      },
       { label: __('Type'), value: row.unit_type },
       { label: __('Finishing'), value: row.finishing_type },
       { label: __('Offer'), value: row.proposal_status || __('Not Sent') },
@@ -197,10 +203,13 @@ function recordDetails(row) {
   }
   return [
     { label: __('Requirements'), value: row.request_notes },
-    { label: __('Location / Area'), value: row.requested_area },
+    {
+      label: __('Destination'),
+      value: row.requested_destination || row.requested_area,
+    },
     { label: __('Unit Type'), value: row.requested_unit_type },
     { label: __('Maximum Budget'), value: row.requested_budget },
-    { label: __('Project'), value: row.requested_project },
+    { label: __('Compound'), value: row.requested_project },
     { label: __('Developer'), value: row.requested_developer },
     { label: __('Finishing'), value: row.requested_finishing_type },
     { label: __('Delivery Time'), value: row.requested_delivery_time },
@@ -213,7 +222,11 @@ function recordDetails(row) {
   )
 }
 
-function unitHref(name) {
-  return `/app/real-estate-unit/${encodeURIComponent(name)}`
+function openUnit(name) {
+  showModal({
+    name,
+    doctype: 'Real Estate Unit',
+    title: __('Real Estate Unit'),
+  })
 }
 </script>

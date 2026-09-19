@@ -93,15 +93,27 @@ const routes = [
       realEstate: {
         doctype: 'Real Estate Unit',
         routeName: 'Real Estate Units',
+        label: 'Real Estate Units',
+        entityLabel: 'Real Estate Unit',
         defaultViewName: 'Real Estate Units View',
         primaryField: 'unit_number',
-        secondaryFields: ['project', 'unit_type', 'status', 'price', 'owner_lead'],
+        secondaryFields: [
+          'project',
+          'destination',
+          'inventory_type',
+          'physical_unit_type',
+          'status',
+          'total_gross',
+          'owner_lead',
+        ],
         fieldLabels: {
-          project: 'Project',
-          unit_type: 'Unit Type',
-          status: 'Status',
-          price: 'Price',
-          owner_lead: 'Owner Lead',
+          project: 'Compound',
+          destination: 'Destination',
+          inventory_type: 'Inventory Type',
+          physical_unit_type: 'Unit Type',
+          status: 'Availability',
+          total_gross: 'Total Gross',
+          owner_lead: 'Seller Owner',
         },
       },
     },
@@ -115,13 +127,57 @@ const routes = [
       realEstate: {
         doctype: 'Real Estate Project',
         routeName: 'Real Estate Projects',
+        label: 'Compounds',
+        entityLabel: 'Compound',
         defaultViewName: 'Real Estate Projects View',
         primaryField: 'project_name',
-        secondaryFields: ['location', 'developer', 'status'],
+        secondaryFields: ['destination', 'developer', 'status'],
         fieldLabels: {
-          location: 'Location',
+          destination: 'Destination',
           developer: 'Developer',
           status: 'Status',
+        },
+      },
+    },
+  },
+  {
+    alias: '/property-developers',
+    path: '/property-developers/view/:viewType?',
+    name: 'Property Developers',
+    component: () => import('@/pages/RealEstateList.vue'),
+    meta: {
+      realEstate: {
+        doctype: 'Property Developer',
+        routeName: 'Property Developers',
+        label: 'Property Developers',
+        entityLabel: 'Property Developer',
+        defaultViewName: 'Property Developers View',
+        primaryField: 'developer_name',
+        secondaryFields: ['founded_year', 'company_registration'],
+        fieldLabels: {
+          founded_year: 'Founded In',
+          company_registration: 'Company Registration',
+        },
+      },
+    },
+  },
+  {
+    alias: '/real-estate-destinations',
+    path: '/real-estate-destinations/view/:viewType?',
+    name: 'Real Estate Destinations',
+    component: () => import('@/pages/RealEstateList.vue'),
+    meta: {
+      realEstate: {
+        doctype: 'Real Estate Destination',
+        routeName: 'Real Estate Destinations',
+        label: 'Destinations',
+        entityLabel: 'Destination',
+        defaultViewName: 'Real Estate Destinations View',
+        primaryField: 'destination_name',
+        secondaryFields: ['destination_code', 'is_active'],
+        fieldLabels: {
+          destination_code: 'Code',
+          is_active: 'Active',
         },
       },
     },
@@ -232,6 +288,8 @@ router.beforeEach(async (to, from, next) => {
       'Call Logs',
       'Real Estate Units',
       'Real Estate Projects',
+      'Property Developers',
+      'Real Estate Destinations',
     ].includes(to.name) &&
     !to.query?.view
   ) {
@@ -252,6 +310,8 @@ router.beforeEach(async (to, from, next) => {
         'Call Logs': 'CRM Call Log',
         'Real Estate Units': 'Real Estate Unit',
         'Real Estate Projects': 'Real Estate Project',
+        'Property Developers': 'Property Developer',
+        'Real Estate Destinations': 'Real Estate Destination',
       }
 
       const doctype = doctypeMap[to.name]
