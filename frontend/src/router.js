@@ -2,6 +2,11 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { usersStore } from '@/stores/users'
 import { sessionStore } from '@/stores/session'
 import { viewsStore } from '@/stores/views'
+import {
+  REAL_ESTATE_DOCTYPE_BY_LIST_ROUTE,
+  REAL_ESTATE_ENTITIES,
+  REAL_ESTATE_LIST_ROUTE_NAMES,
+} from '@/utils/realEstate'
 
 const routes = [
   {
@@ -84,104 +89,23 @@ const routes = [
     name: 'Call Logs',
     component: () => import('@/pages/CallLogs.vue'),
   },
-  {
-    alias: '/real-estate-units',
-    path: '/real-estate-units/view/:viewType?',
-    name: 'Real Estate Units',
-    component: () => import('@/pages/RealEstateList.vue'),
-    meta: {
-      realEstate: {
-        doctype: 'Real Estate Unit',
-        routeName: 'Real Estate Units',
-        label: 'Real Estate Units',
-        entityLabel: 'Real Estate Unit',
-        defaultViewName: 'Real Estate Units View',
-        primaryField: 'unit_number',
-        secondaryFields: [
-          'project',
-          'destination',
-          'inventory_type',
-          'physical_unit_type',
-          'status',
-          'total_gross',
-          'owner_lead',
-        ],
-        fieldLabels: {
-          project: 'Compound',
-          destination: 'Destination',
-          inventory_type: 'Inventory Type',
-          physical_unit_type: 'Unit Type',
-          status: 'Availability',
-          total_gross: 'Total Gross',
-          owner_lead: 'Seller Owner',
-        },
-      },
+  ...REAL_ESTATE_ENTITIES.flatMap((entity) => [
+    {
+      alias: entity.listAlias,
+      path: entity.listPath,
+      name: entity.listRouteName,
+      component: () => import('@/pages/RealEstateList.vue'),
+      meta: { realEstate: entity },
     },
-  },
-  {
-    alias: '/real-estate-projects',
-    path: '/real-estate-projects/view/:viewType?',
-    name: 'Real Estate Projects',
-    component: () => import('@/pages/RealEstateList.vue'),
-    meta: {
-      realEstate: {
-        doctype: 'Real Estate Project',
-        routeName: 'Real Estate Projects',
-        label: 'Compounds',
-        entityLabel: 'Compound',
-        defaultViewName: 'Real Estate Projects View',
-        primaryField: 'project_name',
-        secondaryFields: ['destination', 'developer', 'status'],
-        fieldLabels: {
-          destination: 'Destination',
-          developer: 'Developer',
-          status: 'Status',
-        },
-      },
+    {
+      ...(entity.formAlias ? { alias: entity.formAlias } : {}),
+      path: entity.formPath,
+      name: entity.formRouteName,
+      component: () => import('@/pages/RealEstateForm.vue'),
+      props: true,
+      meta: { realEstate: entity },
     },
-  },
-  {
-    alias: '/property-developers',
-    path: '/property-developers/view/:viewType?',
-    name: 'Property Developers',
-    component: () => import('@/pages/RealEstateList.vue'),
-    meta: {
-      realEstate: {
-        doctype: 'Property Developer',
-        routeName: 'Property Developers',
-        label: 'Property Developers',
-        entityLabel: 'Property Developer',
-        defaultViewName: 'Property Developers View',
-        primaryField: 'developer_name',
-        secondaryFields: ['founded_year', 'company_registration'],
-        fieldLabels: {
-          founded_year: 'Founded In',
-          company_registration: 'Company Registration',
-        },
-      },
-    },
-  },
-  {
-    alias: '/real-estate-destinations',
-    path: '/real-estate-destinations/view/:viewType?',
-    name: 'Real Estate Destinations',
-    component: () => import('@/pages/RealEstateList.vue'),
-    meta: {
-      realEstate: {
-        doctype: 'Real Estate Destination',
-        routeName: 'Real Estate Destinations',
-        label: 'Destinations',
-        entityLabel: 'Destination',
-        defaultViewName: 'Real Estate Destinations View',
-        primaryField: 'destination_name',
-        secondaryFields: ['destination_code', 'is_active'],
-        fieldLabels: {
-          destination_code: 'Code',
-          is_active: 'Active',
-        },
-      },
-    },
-  },
+  ]),
   {
     path: '/calendar',
     name: 'Calendar',
@@ -286,10 +210,7 @@ router.beforeEach(async (to, from, next) => {
       'Notes',
       'Tasks',
       'Call Logs',
-      'Real Estate Units',
-      'Real Estate Projects',
-      'Property Developers',
-      'Real Estate Destinations',
+      ...REAL_ESTATE_LIST_ROUTE_NAMES,
     ].includes(to.name) &&
     !to.query?.view
   ) {
@@ -308,10 +229,7 @@ router.beforeEach(async (to, from, next) => {
         Notes: 'FCRM Note',
         Tasks: 'CRM Task',
         'Call Logs': 'CRM Call Log',
-        'Real Estate Units': 'Real Estate Unit',
-        'Real Estate Projects': 'Real Estate Project',
-        'Property Developers': 'Property Developer',
-        'Real Estate Destinations': 'Real Estate Destination',
+        ...REAL_ESTATE_DOCTYPE_BY_LIST_ROUTE,
       }
 
       const doctype = doctypeMap[to.name]

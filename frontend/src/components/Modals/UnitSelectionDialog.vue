@@ -376,9 +376,9 @@
 
 <script setup>
 import LinkControl from '@/components/Controls/Link.vue'
-import { useDoctypeModal } from '@/composables/doctypeModal'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { Button, Dialog, call, toast } from 'frappe-ui'
+import { useRouter } from 'vue-router'
 
 const UnitFact = defineComponent({
   props: {
@@ -402,7 +402,7 @@ const UnitFact = defineComponent({
   },
 })
 
-const { showModal } = useDoctypeModal()
+const router = useRouter()
 
 const props = defineProps({
   leadId: { type: String, required: true },
@@ -494,12 +494,12 @@ function toggleUnit(unit) {
 }
 
 function openUnit(unit) {
-  showModal({
-    name: unit.name,
-    doctype: 'Real Estate Unit',
-    title: __('Real Estate Unit'),
-    callbacks: { afterUpdate: () => fetchUnits() },
-  })
+  const href = router.resolve({
+    name: 'Real Estate Unit',
+    params: { recordId: unit.name },
+  }).href
+  window.addEventListener('focus', fetchUnits, { once: true })
+  window.open(href, '_blank', 'noopener')
 }
 
 function formatPrice(value) {

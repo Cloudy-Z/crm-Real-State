@@ -187,6 +187,8 @@ import BrushCleaningIcon from '~icons/lucide/brush-cleaning'
 import LucideLayoutDashboard from '~icons/lucide/layout-dashboard'
 import LucideBuilding2 from '~icons/lucide/building-2'
 import LucideHouse from '~icons/lucide/house'
+import LucideShapes from '~icons/lucide/shapes'
+import LucideSparkles from '~icons/lucide/sparkles'
 import CRMLogo from '@/components/Icons/CRMLogo.vue'
 import InviteIcon from '@/components/Icons/InviteIcon.vue'
 import ConvertIcon from '@/components/Icons/ConvertIcon.vue'
@@ -266,7 +268,7 @@ const links = [
       {
         label: 'All Leads',
         icon: LeadsIcon,
-        to: { name: 'Leads', query: { lead_scope: 'all' } },
+        to: { name: 'Leads' },
       },
       {
         label: 'Buyers',
@@ -314,6 +316,16 @@ const links = [
     label: 'Destinations',
     icon: PinIcon,
     to: 'Real Estate Destinations',
+  },
+  {
+    label: 'Unit Types',
+    icon: LucideShapes,
+    to: 'Real Estate Unit Types',
+  },
+  {
+    label: 'Amenities',
+    icon: LucideSparkles,
+    to: 'Real Estate Amenities',
   },
   {
     label: 'Notes',
@@ -432,6 +444,10 @@ function getIcon(routeName, icon) {
       return LucideBuilding2
     case 'Real Estate Destinations':
       return PinIcon
+    case 'Real Estate Unit Types':
+      return LucideShapes
+    case 'Real Estate Amenities':
+      return LucideSparkles
     case 'Notes':
       return NoteIcon
     case 'Call Logs':

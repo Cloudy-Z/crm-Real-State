@@ -293,6 +293,7 @@ import { statusesStore } from '@/stores/statuses'
 import { callEnabled } from '@/composables/telephony'
 import { useBroadcast } from '@/composables/useBroadcast'
 import { formatDate, timeAgo, website, formatTime } from '@/utils'
+import { BUYER_ROLE, roleFromRouteQuery } from '@/utils/leadRole'
 import { useOnboarding, useTelemetry } from 'frappe-ui/frappe'
 import { Avatar, Tooltip, Dropdown } from 'frappe-ui'
 import { useRoute } from 'vue-router'
@@ -310,18 +311,9 @@ const { showModal } = useDoctypeModal()
 
 const route = useRoute()
 
-function leadTypeFromRoute() {
-  const routeValue = String(
-    route.query.party_type || route.query.lead_scope || '',
-  ).toLowerCase()
-  if (['seller', 'sellers'].includes(routeValue)) return 'Seller'
-  if (['buyer', 'buyers'].includes(routeValue)) return 'Buyer'
-  return null
-}
-
 const lockedLeadFilters = computed(() => {
   const filters = { converted: 0 }
-  const partyType = leadTypeFromRoute()
+  const partyType = roleFromRouteQuery(route.query)
   if (partyType) filters.party_type = partyType
   return filters
 })
@@ -339,14 +331,12 @@ on('trigger_lead_create', (data) => {
 
 const defaults = reactive({})
 
-function applyLeadTypeDefault() {
-  delete defaults.party_type
-  const partyType = leadTypeFromRoute()
-  if (partyType) defaults.party_type = partyType
+function applyLeadRoleDefault() {
+  defaults.party_type = roleFromRouteQuery(route.query) || BUYER_ROLE
 }
 
 function openLeadModal() {
-  applyLeadTypeDefault()
+  applyLeadRoleDefault()
   showLeadModal.value = true
 }
 

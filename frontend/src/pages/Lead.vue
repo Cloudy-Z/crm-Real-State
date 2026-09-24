@@ -70,6 +70,16 @@
             </div>
           </div>
           <div class="flex-1 overflow-auto p-5">
+            <div
+              v-if="!hasCanonicalPartyRole"
+              class="mb-5 rounded border border-outline-orange-1 bg-surface-orange-1 p-4 text-sm text-ink-orange-3"
+            >
+              {{
+                __(
+                  'Select Buyer or Seller in the Party Role field. No buyer interest or seller property workflow is available until the role is valid.',
+                )
+              }}
+            </div>
             <div v-if="isBuyerLead" class="mb-5 flex flex-col gap-4">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div
@@ -221,19 +231,19 @@
               />
             </template>
             <div
-              v-else-if="linkedProperties.loading"
+              v-else-if="isSellerLead && linkedProperties.loading"
               class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
             >
               {{ __('Loading linked properties...') }}
             </div>
             <div
-              v-else-if="!visibleLinkedPropertyRows.length"
+              v-else-if="isSellerLead && !visibleLinkedPropertyRows.length"
               class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
             >
               {{ linkedPropertiesEmptyText }}
             </div>
             <div
-              v-else
+              v-else-if="isSellerLead"
               class="overflow-hidden rounded border border-outline-gray-1"
             >
               <table class="w-full text-left text-sm">
@@ -570,13 +580,16 @@ import {
 } from '@/utils'
 import { getView } from '@/utils/view'
 import { renderFieldLayoutDialog } from '@/utils/renderFieldLayoutDialog'
+import {
+  isBuyerLead as isBuyerLeadRecord,
+  isSellerLead as isSellerLeadRecord,
+} from '@/utils/leadRole'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
 import { statusesStore } from '@/stores/statuses'
 import { getMeta } from '@/stores/meta'
 import { useDocument } from '@/data/document'
 import { callEnabled } from '@/composables/telephony'
-import { useDoctypeModal } from '@/composables/doctypeModal'
 import {
   createResource,
   FileUploader,
@@ -600,7 +613,6 @@ const { doctypeMeta } = getMeta('CRM Lead')
 
 const route = useRoute()
 const router = useRouter()
-const { showModal: showDoctypeModal } = useDoctypeModal()
 
 const props = defineProps({
   leadId: { type: String, required: true },
@@ -632,8 +644,11 @@ const { triggerOnRender, assignees, permissions, document, scripts, error } =
 const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 
 const doc = computed(() => document.doc || {})
-const isBuyerLead = computed(() => doc.value.party_type !== 'Seller')
-const isSellerLead = computed(() => doc.value.party_type === 'Seller')
+const isBuyerLead = computed(() => isBuyerLeadRecord(doc.value))
+const isSellerLead = computed(() => isSellerLeadRecord(doc.value))
+const hasCanonicalPartyRole = computed(
+  () => isBuyerLead.value || isSellerLead.value,
+)
 
 onMounted(async () => {
   if (document.doc) await triggerOnRender()
@@ -718,7 +733,11 @@ const tabs = computed(() => {
     },
     {
       name: 'Properties',
-      label: isBuyerLead.value ? __('Interest') : __('Properties'),
+      label: isBuyerLead.value
+        ? __('Interest')
+        : isSellerLead.value
+          ? __('Properties')
+          : __('Party Role Required'),
       icon: LinkIcon,
     },
     {
@@ -792,27 +811,36 @@ const visibleLinkedPropertyRows = computed(() => {
       (row) => row.owner_lead === props.leadId,
     )
   }
+  if (!isBuyerLead.value) return []
   return linkedPropertyRows.value.filter(
     (row) => row.relationship !== 'Seller Unit',
   )
 })
 
 const linkedPropertiesTitle = computed(() =>
-  isBuyerLead.value ? __('Interest') : __('Properties'),
+  isBuyerLead.value
+    ? __('Interest')
+    : isSellerLead.value
+      ? __('Properties')
+      : __('Party Role Required'),
 )
 
 const linkedPropertiesDescription = computed(() =>
   isBuyerLead.value
     ? __('Buyer interest details plus one or many selected inventory units.')
-    : __(
+    : isSellerLead.value
+      ? __(
         'Seller property onboarding list: property identity, compound, developer, type, finishing, asking price, and status.',
-      ),
+        )
+      : __('Select Buyer or Seller in Party Role before using real-estate workflows.'),
 )
 
 const linkedPropertiesEmptyText = computed(() =>
   isBuyerLead.value
     ? __('No interested units linked to this buyer lead yet.')
-    : __('No seller properties assigned to this lead yet.'),
+    : isSellerLead.value
+      ? __('No seller properties assigned to this lead yet.')
+      : __('Party Role is required.'),
 )
 
 const sections = createResource({
@@ -999,6 +1027,10 @@ function executePhoneCall() {
 // 3. Unified Action Web — one form, one final submission
 // ---------------------------------------------------------------------------
 function openUnifiedAction(action, { forceImmediate = false } = {}) {
+  if (!isBuyerLead.value) {
+    toast.error(__('Buyer workflow actions require Party Role = Buyer.'))
+    return
+  }
   if (!action?.action_type) {
     toast.error(
       __('The selected action is no longer available. Reload and retry.'),
@@ -1012,6 +1044,10 @@ function openUnifiedAction(action, { forceImmediate = false } = {}) {
 }
 
 function openUnifiedCancellation(action) {
+  if (!isBuyerLead.value) {
+    toast.error(__('Buyer workflow actions require Party Role = Buyer.'))
+    return
+  }
   if (!action?.action_type) return
   unifiedAction.value = { ...action }
   unifiedForceImmediate.value = false
@@ -1043,6 +1079,10 @@ async function handleUnifiedActionSubmitted(result, payload) {
 }
 
 function openInterestWorkflow() {
+  if (!isBuyerLead.value) {
+    toast.error(__('Only Buyer leads can have interests.'))
+    return
+  }
   const action = actionContext.data?.current_action
   if (action?.action_type === 'Add Interest') {
     openUnifiedAction(action)
@@ -1101,11 +1141,9 @@ function cancelInterestUnitSelection() {
 
 function openUnitRecord(unit) {
   if (!unit) return
-  showDoctypeModal({
-    name: unit,
-    doctype: 'Real Estate Unit',
-    title: __('Real Estate Unit'),
-    callbacks: { afterUpdate: reloadActionWeb },
+  router.push({
+    name: 'Real Estate Unit',
+    params: { recordId: unit },
   })
 }
 
@@ -1716,7 +1754,7 @@ async function addSellerProperty() {
 }
 
 async function assignPropertyUnitToSeller() {
-  if (doc.value.party_type !== 'Seller') {
+  if (!isSellerLead.value) {
     toast.error(__('Only seller leads can be assigned property units'))
     return
   }
@@ -1811,6 +1849,10 @@ function beforeStatusChange(data) {
 }
 
 function reloadResources(data) {
+  if (Object.hasOwn(data ?? {}, 'party_type')) {
+    reloadActionWeb()
+    return
+  }
   if (Object.hasOwn(data ?? {}, 'lead_owner')) {
     assignees.reload()
   }

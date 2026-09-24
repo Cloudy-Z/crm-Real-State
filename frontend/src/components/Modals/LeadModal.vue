@@ -55,6 +55,11 @@ import { showQuickEntryModal, quickEntryProps } from '@/composables/modals'
 import { useOnboarding, useTelemetry } from 'frappe-ui/frappe'
 import { createResource } from 'frappe-ui'
 import { useDocument } from '@/data/document'
+import {
+  BUYER_ROLE,
+  LEAD_ROLES,
+  canonicalLeadRoleOrDefault,
+} from '@/utils/leadRole'
 import { computed, onMounted, ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -120,6 +125,7 @@ async function createNewLead() {
       doc: {
         doctype: 'CRM Lead',
         ...lead.doc,
+        party_type: lead.doc.party_type,
       },
     },
     {
@@ -127,6 +133,10 @@ async function createNewLead() {
         error.value = null
         if (!lead.doc.first_name) {
           error.value = __('First Name is mandatory')
+          return error.value
+        }
+        if (!LEAD_ROLES.includes(lead.doc.party_type)) {
+          error.value = __('Party Role must be Buyer or Seller')
           return error.value
         }
         if (lead.doc.annual_revenue) {
@@ -185,6 +195,9 @@ function openQuickEntryModal() {
 onMounted(() => {
   lead.doc.no_of_employees = '1-10'
   Object.assign(lead.doc, props.defaults)
+  lead.doc.party_type = canonicalLeadRoleOrDefault(
+    props.defaults.party_type || lead.doc.party_type || BUYER_ROLE,
+  )
 
   if (!lead.doc?.lead_owner) {
     lead.doc.lead_owner = getUser().name

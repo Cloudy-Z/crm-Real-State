@@ -383,6 +383,7 @@ export function useDocument(doctype, docname, resourceOverrides = {}) {
     triggerOnRender,
     triggerOnBeforeCreate,
     triggerOnValidate,
+    checkMandatory,
     triggerOnSave,
     triggerOnError,
     triggerOnChange,

@@ -697,9 +697,10 @@
 
 <script setup>
 import LinkControl from '@/components/Controls/Link.vue'
-import { useDoctypeModal } from '@/composables/doctypeModal'
+import { isBuyerLead } from '@/utils/leadRole'
 import { Button, Dialog, call, toast } from 'frappe-ui'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 const SectionTitle = defineComponent({
   props: {
@@ -847,7 +848,7 @@ const filterOptions = reactive({
   ],
 })
 const draft = reactive({})
-const { showModal } = useDoctypeModal()
+const router = useRouter()
 
 const actionType = computed(() => props.action?.action_type || '')
 const actionPurpose = computed(() => props.action?.purpose || '')
@@ -1194,12 +1195,12 @@ function toggleUnit(name) {
 }
 
 function openUnit(unit) {
-  showModal({
-    name: unit.name,
-    doctype: 'Real Estate Unit',
-    title: __('Real Estate Unit'),
-    callbacks: { afterUpdate: () => loadMatches() },
-  })
+  const href = router.resolve({
+    name: 'Real Estate Unit',
+    params: { recordId: unit.name },
+  }).href
+  window.addEventListener('focus', loadMatches, { once: true })
+  window.open(href, '_blank', 'noopener')
 }
 
 function onRequestedUnitChange() {
@@ -1616,6 +1617,10 @@ function buildActionPayload() {
 }
 
 async function submitBundle() {
+  if (!isBuyerLead(props.lead)) {
+    toast.error(__('Buyer workflow actions require Party Role = Buyer.'))
+    return
+  }
   const dispatchWindow = isSendOffer.value
     ? window.open('about:blank', '_blank')
     : null

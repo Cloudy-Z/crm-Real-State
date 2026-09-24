@@ -115,9 +115,9 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useDoctypeModal } from '@/composables/doctypeModal'
+import { useRouter } from 'vue-router'
 
-const { showModal } = useDoctypeModal()
+const router = useRouter()
 
 const props = defineProps({
   rows: { type: Array, default: () => [] },
@@ -223,10 +223,9 @@ function recordDetails(row) {
 }
 
 function openUnit(name) {
-  showModal({
-    name,
-    doctype: 'Real Estate Unit',
-    title: __('Real Estate Unit'),
+  router.push({
+    name: 'Real Estate Unit',
+    params: { recordId: name },
   })
 }
 </script>

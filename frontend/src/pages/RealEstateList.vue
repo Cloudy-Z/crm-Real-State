@@ -9,6 +9,7 @@
     </template>
     <template #right-header>
       <Button
+        v-if="canCreate"
         variant="solid"
         :label="__('Create')"
         iconLeft="plus"
@@ -78,13 +79,12 @@ import ViewBreadcrumbs from '@/components/ViewBreadcrumbs.vue'
 import LayoutHeader from '@/components/LayoutHeader.vue'
 import ViewControls from '@/components/ViewControls.vue'
 import EmptyState from '@/components/ListViews/EmptyState.vue'
-import { useDoctypeModal } from '@/composables/doctypeModal'
-import { ListFooter } from 'frappe-ui'
+import { ListFooter, createResource } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
-const { showModal } = useDoctypeModal()
+const router = useRouter()
 
 const records = ref({})
 const loadMore = ref(1)
@@ -93,13 +93,19 @@ const viewControls = ref(null)
 
 const pageConfig = computed(() => route.meta?.realEstate || {})
 const doctype = computed(() => pageConfig.value.doctype)
-const routeName = computed(() => pageConfig.value.routeName || route.name)
+const routeName = computed(() => pageConfig.value.listRouteName || route.name)
 const displayName = computed(() => pageConfig.value.label || routeName.value)
-const entityLabel = computed(() => pageConfig.value.entityLabel || doctype.value)
 const defaultViewName = computed(() => pageConfig.value.defaultViewName || `${routeName.value} View`)
 const primaryField = computed(() => pageConfig.value.primaryField || 'name')
 const secondaryFields = computed(() => pageConfig.value.secondaryFields || [])
 const fieldLabels = computed(() => pageConfig.value.fieldLabels || {})
+
+const doctypePermissions = createResource({
+  url: 'real_estate_crm_customs.api.get_real_estate_doctype_permissions',
+  params: { doctype: doctype.value },
+  auto: true,
+})
+const canCreate = computed(() => Boolean(doctypePermissions.data?.create))
 
 watch(
   () => records.value?.data?.page_length_count,
@@ -113,25 +119,25 @@ function getPrimaryLabel(record) {
   return record?.[primaryField.value] || record?.name
 }
 
-const modalCallbacks = {
-  afterInsert: () => records.value?.reload?.(),
-  afterUpdate: () => records.value?.reload?.(),
-}
-
 function createRecord() {
-  showModal({
-    doctype: doctype.value,
-    title: entityLabel.value,
-    callbacks: modalCallbacks,
+  router.push({
+    name: pageConfig.value.formRouteName,
+    params: { recordId: 'new' },
+    query: {
+      view: route.query.view,
+      viewType: route.params.viewType,
+    },
   })
 }
 
 function editRecord(name) {
-  showModal({
-    name,
-    doctype: doctype.value,
-    title: entityLabel.value,
-    callbacks: modalCallbacks,
+  router.push({
+    name: pageConfig.value.formRouteName,
+    params: { recordId: name },
+    query: {
+      view: route.query.view,
+      viewType: route.params.viewType,
+    },
   })
 }
 </script>

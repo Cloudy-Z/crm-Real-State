@@ -102,6 +102,10 @@ import TaskIcon from '@/components/Icons/TaskIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'
 import NotificationsIcon from '@/components/Icons/NotificationsIcon.vue'
 import SidebarLink from '@/components/SidebarLink.vue'
+import LucideBuilding2 from '~icons/lucide/building-2'
+import LucideHouse from '~icons/lucide/house'
+import LucideShapes from '~icons/lucide/shapes'
+import LucideSparkles from '~icons/lucide/sparkles'
 import { viewsStore } from '@/stores/views'
 import { unreadNotificationsCount } from '@/stores/notifications'
 import { computed, h } from 'vue'
@@ -129,6 +133,36 @@ const links = [
     label: 'Organizations',
     icon: OrganizationsIcon,
     to: 'Organizations',
+  },
+  {
+    label: 'Real Estate Units',
+    icon: LucideHouse,
+    to: 'Real Estate Units',
+  },
+  {
+    label: 'Compounds',
+    icon: LucideBuilding2,
+    to: 'Real Estate Projects',
+  },
+  {
+    label: 'Property Developers',
+    icon: LucideBuilding2,
+    to: 'Property Developers',
+  },
+  {
+    label: 'Destinations',
+    icon: PinIcon,
+    to: 'Real Estate Destinations',
+  },
+  {
+    label: 'Unit Types',
+    icon: LucideShapes,
+    to: 'Real Estate Unit Types',
+  },
+  {
+    label: 'Amenities',
+    icon: LucideSparkles,
+    to: 'Real Estate Amenities',
   },
   {
     label: 'Notes',
@@ -200,6 +234,17 @@ function getIcon(routeName, icon) {
       return ContactsIcon
     case 'Organizations':
       return OrganizationsIcon
+    case 'Real Estate Units':
+      return LucideHouse
+    case 'Real Estate Projects':
+    case 'Property Developers':
+      return LucideBuilding2
+    case 'Real Estate Destinations':
+      return PinIcon
+    case 'Real Estate Unit Types':
+      return LucideShapes
+    case 'Real Estate Amenities':
+      return LucideSparkles
     case 'Notes':
       return NoteIcon
     case 'Call Logs':
