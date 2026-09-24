@@ -5,6 +5,7 @@ import {
   isBuyerLead,
   isSellerLead,
   leadListRouteForRole,
+  normalizeLeadViewFilters,
   normalizeLeadListRouteName,
   normalizeLegacyLeadViewRoute,
   normalizeLeadRole,
@@ -67,6 +68,19 @@ describe('Lead Party Role', () => {
     expect(normalizeLegacyLeadViewRoute(buyerView).route_name).toBe('Buyers')
     expect(normalizeLegacyLeadViewRoute(sellerView).route_name).toBe('Sellers')
     expect(leadListRouteForRole(BUYER_ROLE)).toBe('Buyers')
+  })
+
+  it('repairs the Administrator standard view legacy role filter', () => {
+    expect(normalizeLeadViewFilters('{"custom_type":"Buyer"}')).toEqual({
+      party_type: BUYER_ROLE,
+    })
+    const view = {
+      route_name: 'Leads',
+      filters: '{"custom_type":"Buyer"}',
+    }
+    normalizeLegacyLeadViewRoute(view)
+    expect(view.route_name).toBe('Buyers')
+    expect(JSON.parse(view.filters)).toEqual({ party_type: BUYER_ROLE })
   })
 
   it('allows only known Lead list routes in detail breadcrumbs', () => {

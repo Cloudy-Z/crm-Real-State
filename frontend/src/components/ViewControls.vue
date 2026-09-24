@@ -325,6 +325,7 @@ import { viewsStore } from '@/stores/views'
 import { usersStore } from '@/stores/users'
 import { getMeta } from '@/stores/meta'
 import { isEmoji } from '@/utils'
+import { normalizeLeadViewFilters } from '@/utils/leadRole'
 import {
   Tooltip,
   createResource,
@@ -461,7 +462,10 @@ function getParams() {
   let _view = getView(route.query.view, route.params.viewType, props.doctype)
   const view_name = _view?.name || ''
   const view_type = _view?.type || route.params.viewType || 'list'
-  const filters = (_view?.filters && JSON.parse(_view.filters)) || {}
+  let filters = (_view?.filters && JSON.parse(_view.filters)) || {}
+  if (props.doctype === 'CRM Lead') {
+    filters = normalizeLeadViewFilters(filters)
+  }
 
   for (const fieldname of props.lockedFilterFields) {
     if (Object.prototype.hasOwnProperty.call(props.filters, fieldname)) {
