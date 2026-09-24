@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { createResource } from 'frappe-ui'
 import { reactive, ref } from 'vue'
+import { normalizeLegacyLeadViewRoute } from '@/utils/leadRole'
 
 export const viewsStore = defineStore('crm-views', (doctype) => {
   if (typeof doctype !== 'string') {
@@ -25,6 +26,7 @@ export const viewsStore = defineStore('crm-views', (doctype) => {
       publicViews.value = []
       defaultView.value = null
       for (let view of views) {
+        normalizeLegacyLeadViewRoute(view)
         viewsByName[view.name] = view
         view.type = view.type || 'list'
         if (view.pinned) {

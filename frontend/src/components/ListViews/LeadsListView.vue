@@ -7,7 +7,11 @@
       getRowRoute: (row) => ({
         name: 'Lead',
         params: { leadId: row.name },
-        query: { view: route.query.view, viewType: route.params.viewType },
+        query: {
+          view: route.query.view,
+          viewType: route.params.viewType,
+          listRoute: leadListRouteForRole(roleFromRoute(route)),
+        },
       }),
       selectable: options.selectable,
       showTooltip: options.showTooltip,
@@ -221,6 +225,7 @@
 </template>
 
 <script setup>
+import { leadListRouteForRole, roleFromRoute } from '@/utils/leadRole'
 import HeartIcon from '@/components/Icons/HeartIcon.vue'
 import IndicatorIcon from '@/components/Icons/IndicatorIcon.vue'
 import PhoneIcon from '@/components/Icons/PhoneIcon.vue'

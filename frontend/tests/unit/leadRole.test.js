@@ -4,7 +4,11 @@ import {
   canonicalLeadRoleOrDefault,
   isBuyerLead,
   isSellerLead,
+  leadListRouteForRole,
+  normalizeLeadListRouteName,
+  normalizeLegacyLeadViewRoute,
   normalizeLeadRole,
+  roleFromRoute,
   roleFromRouteQuery,
 } from '@/utils/leadRole'
 import { describe, expect, it } from 'vitest'
@@ -36,5 +40,38 @@ describe('Lead Party Role', () => {
     expect(roleFromRouteQuery({ party_type: 'Seller' })).toBe(SELLER_ROLE)
     expect(roleFromRouteQuery({ lead_scope: 'buyers' })).toBe(BUYER_ROLE)
     expect(roleFromRouteQuery({ lead_scope: 'all' })).toBeNull()
+  })
+
+  it('uses isolated route metadata before any stale compatibility query', () => {
+    expect(
+      roleFromRoute({
+        meta: { partyType: SELLER_ROLE },
+        query: { party_type: BUYER_ROLE },
+      }),
+    ).toBe(SELLER_ROLE)
+    expect(roleFromRoute({ query: { party_type: BUYER_ROLE } })).toBe(
+      BUYER_ROLE,
+    )
+    expect(roleFromRoute({ name: 'Leads', query: {} })).toBeNull()
+  })
+
+  it('migrates legacy role-filtered Lead views to dedicated routes', () => {
+    const buyerView = {
+      route_name: 'Leads',
+      filters: '{"party_type":"Buyer"}',
+    }
+    const sellerView = {
+      route_name: 'Leads',
+      filters: { party_type: ['=', 'Seller'] },
+    }
+    expect(normalizeLegacyLeadViewRoute(buyerView).route_name).toBe('Buyers')
+    expect(normalizeLegacyLeadViewRoute(sellerView).route_name).toBe('Sellers')
+    expect(leadListRouteForRole(BUYER_ROLE)).toBe('Buyers')
+  })
+
+  it('allows only known Lead list routes in detail breadcrumbs', () => {
+    expect(normalizeLeadListRouteName('Sellers')).toBe('Sellers')
+    expect(normalizeLeadListRouteName('Buyers')).toBe('Buyers')
+    expect(normalizeLeadListRouteName('Invalid Route')).toBe('Leads')
   })
 })

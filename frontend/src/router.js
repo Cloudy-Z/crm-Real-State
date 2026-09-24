@@ -30,6 +30,20 @@ const routes = [
     component: () => import('@/pages/Leads.vue'),
   },
   {
+    alias: '/buyers',
+    path: '/buyers/view/:viewType?',
+    name: 'Buyers',
+    component: () => import('@/pages/Leads.vue'),
+    meta: { partyType: 'Buyer', label: 'Buyers' },
+  },
+  {
+    alias: '/sellers',
+    path: '/sellers/view/:viewType?',
+    name: 'Sellers',
+    component: () => import('@/pages/Leads.vue'),
+    meta: { partyType: 'Seller', label: 'Sellers' },
+  },
+  {
     path: '/leads/:leadId',
     name: 'Lead',
     component: () => import(`@/pages/${handleMobileView('Lead')}.vue`),
@@ -204,6 +218,8 @@ router.beforeEach(async (to, from, next) => {
   } else if (
     [
       'Leads',
+      'Buyers',
+      'Sellers',
       'Deals',
       'Contacts',
       'Organizations',
@@ -223,6 +239,8 @@ router.beforeEach(async (to, from, next) => {
     if (!viewType) {
       const doctypeMap = {
         Leads: 'CRM Lead',
+        Buyers: 'CRM Lead',
+        Sellers: 'CRM Lead',
         Deals: 'CRM Deal',
         Contacts: 'Contact',
         Organizations: 'CRM Organization',

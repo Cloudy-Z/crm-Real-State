@@ -145,6 +145,7 @@ import SLASection from '@/components/SLASection.vue'
 import CustomActions from '@/components/CustomActions.vue'
 import { setupCustomizations, isTranslatable } from '@/utils'
 import { getView } from '@/utils/view'
+import { normalizeLeadListRouteName } from '@/utils/leadRole'
 import { getSettings } from '@/stores/settings'
 import { globalStore } from '@/stores/global'
 import { statusesStore } from '@/stores/statuses'
@@ -236,7 +237,8 @@ watch(
 const reload = ref(false)
 
 const breadcrumbs = computed(() => {
-  let items = [{ label: __('Leads'), route: { name: 'Leads' } }]
+  const listRoute = normalizeLeadListRouteName(route.query.listRoute)
+  let items = [{ label: __(listRoute), route: { name: listRoute } }]
 
   if (route.query.view || route.query.viewType) {
     let view = getView(route.query.view, route.query.viewType, 'CRM Lead')
@@ -245,7 +247,7 @@ const breadcrumbs = computed(() => {
         label: __(view.label),
         icon: view.icon,
         route: {
-          name: 'Leads',
+          name: listRoute,
           params: { viewType: route.query.viewType },
           query: { view: route.query.view },
         },
@@ -255,7 +257,11 @@ const breadcrumbs = computed(() => {
 
   items.push({
     label: title.value,
-    route: { name: 'Lead', params: { leadId: props.leadId } },
+    route: {
+      name: 'Lead',
+      params: { leadId: props.leadId },
+      query: route.query,
+    },
   })
   return items
 })

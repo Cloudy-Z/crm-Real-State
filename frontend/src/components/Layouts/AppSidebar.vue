@@ -273,12 +273,12 @@ const links = [
       {
         label: 'Buyers',
         icon: LeadsIcon,
-        to: { name: 'Leads', query: { party_type: 'Buyer' } },
+        to: { name: 'Buyers' },
       },
       {
         label: 'Sellers',
         icon: LeadsIcon,
-        to: { name: 'Leads', query: { party_type: 'Seller' } },
+        to: { name: 'Sellers' },
       },
     ],
   },
@@ -398,10 +398,12 @@ function parseView(views) {
 }
 
 function isDuplicatedSidebarView(view) {
-  let primaryLinks = links.map((link) => ({
-    label: link.label,
-    routeName: typeof link.to === 'string' ? link.to : link.to?.name,
-  }))
+  let primaryLinks = links
+    .flatMap((link) => [link, ...(link.children || [])])
+    .map((link) => ({
+      label: link.label,
+      routeName: typeof link.to === 'string' ? link.to : link.to?.name,
+    }))
 
   let duplicatesPrimaryLink = primaryLinks.some(
     (link) => link.routeName === view.route_name && link.label === view.label,
@@ -429,6 +431,8 @@ function getIcon(routeName, icon) {
 
   switch (routeName) {
     case 'Leads':
+    case 'Buyers':
+    case 'Sellers':
       return LeadsIcon
     case 'Deals':
       return DealsIcon

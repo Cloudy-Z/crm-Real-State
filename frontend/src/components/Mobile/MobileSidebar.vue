@@ -120,6 +120,16 @@ const links = [
     to: 'Leads',
   },
   {
+    label: 'Buyers',
+    icon: LeadsIcon,
+    to: 'Buyers',
+  },
+  {
+    label: 'Sellers',
+    icon: LeadsIcon,
+    to: 'Sellers',
+  },
+  {
     label: 'Deals',
     icon: DealsIcon,
     to: 'Deals',
@@ -227,6 +237,8 @@ function getIcon(routeName, icon) {
 
   switch (routeName) {
     case 'Leads':
+    case 'Buyers':
+    case 'Sellers':
       return LeadsIcon
     case 'Deals':
       return DealsIcon

@@ -1,7 +1,11 @@
 <template>
   <LayoutHeader>
     <template #left-header>
-      <ViewBreadcrumbs v-model="viewControls" routeName="Leads" />
+      <ViewBreadcrumbs
+        v-model="viewControls"
+        :routeName="route.name"
+        :label="route.meta?.label || 'Leads'"
+      />
     </template>
     <template #right-header>
       <CustomActions
@@ -17,7 +21,7 @@
     </template>
   </LayoutHeader>
   <ViewControls
-    :key="route.query.party_type || route.query.lead_scope || 'all'"
+    :key="`${route.name}:${leadListRole || 'all'}`"
     ref="viewControls"
     v-model="leads"
     v-model:loadMore="loadMore"
@@ -25,6 +29,7 @@
     v-model:updatedPageCount="updatedPageCount"
     doctype="CRM Lead"
     :filters="lockedLeadFilters"
+    :lockedFilterFields="['party_type']"
     :options="{
       allowedViews: ['list', 'group_by', 'kanban'],
     }"
@@ -36,7 +41,11 @@
       getRoute: (row) => ({
         name: 'Lead',
         params: { leadId: row.name },
-        query: { view: route.query.view, viewType: route.params.viewType },
+        query: {
+          view: route.query.view,
+          viewType: route.params.viewType,
+          listRoute: leadListRouteForRole(leadListRole),
+        },
       }),
       onNewClick: (column) => onNewClick(column),
     }"
@@ -293,7 +302,11 @@ import { statusesStore } from '@/stores/statuses'
 import { callEnabled } from '@/composables/telephony'
 import { useBroadcast } from '@/composables/useBroadcast'
 import { formatDate, timeAgo, website, formatTime } from '@/utils'
-import { BUYER_ROLE, roleFromRouteQuery } from '@/utils/leadRole'
+import {
+  BUYER_ROLE,
+  leadListRouteForRole,
+  roleFromRoute,
+} from '@/utils/leadRole'
 import { useOnboarding, useTelemetry } from 'frappe-ui/frappe'
 import { Avatar, Tooltip, Dropdown } from 'frappe-ui'
 import { useRoute } from 'vue-router'
@@ -311,9 +324,11 @@ const { showModal } = useDoctypeModal()
 
 const route = useRoute()
 
+const leadListRole = computed(() => roleFromRoute(route))
+
 const lockedLeadFilters = computed(() => {
   const filters = { converted: 0 }
-  const partyType = roleFromRouteQuery(route.query)
+  const partyType = leadListRole.value
   if (partyType) filters.party_type = partyType
   return filters
 })
@@ -332,7 +347,7 @@ on('trigger_lead_create', (data) => {
 const defaults = reactive({})
 
 function applyLeadRoleDefault() {
-  defaults.party_type = roleFromRouteQuery(route.query) || BUYER_ROLE
+  defaults.party_type = leadListRole.value || BUYER_ROLE
 }
 
 function openLeadModal() {

@@ -345,6 +345,7 @@ import ImportIcon from '~icons/lucide/import'
 const props = defineProps({
   doctype: { type: String, required: true },
   filters: { type: Object, default: () => ({}) },
+  lockedFilterFields: { type: Array, default: () => [] },
   options: {
     type: Object,
     default: () => ({
@@ -461,6 +462,14 @@ function getParams() {
   const view_name = _view?.name || ''
   const view_type = _view?.type || route.params.viewType || 'list'
   const filters = (_view?.filters && JSON.parse(_view.filters)) || {}
+
+  for (const fieldname of props.lockedFilterFields) {
+    if (Object.prototype.hasOwnProperty.call(props.filters, fieldname)) {
+      filters[fieldname] = props.filters[fieldname]
+    } else {
+      delete filters[fieldname]
+    }
+  }
   const order_by = _view?.order_by || 'modified desc'
   const group_by_field = _view?.group_by_field || 'owner'
   const columns = _view?.columns || ''
@@ -514,7 +523,14 @@ function getParams() {
 list.value = createResource({
   url: 'crm.api.doc.get_data',
   params: getParams(),
-  cache: [props.doctype, route.query.view, route.params.viewType],
+  cache: [
+    props.doctype,
+    route.name,
+    route.query.view,
+    route.params.viewType,
+    JSON.stringify(props.filters),
+    JSON.stringify(props.lockedFilterFields),
+  ],
   onSuccess(data) {
     let cv = getView(route.query.view, route.params.viewType, props.doctype)
     let params = list.value.params ? list.value.params : getParams()
@@ -822,11 +838,19 @@ const quickFilters = createResource({
 if (!quickFilters.data) quickFilters.fetch()
 
 function setupNewQuickFilters(filters) {
-  newQuickFilters.value = filters.map((f) => ({
-    label: f.label,
-    fieldname: f.fieldname,
-    fieldtype: f.fieldtype,
-  }))
+  newQuickFilters.value = filters
+    .filter(
+      (f) =>
+        !(
+          props.lockedFilterFields.includes(f.fieldname) &&
+          Object.prototype.hasOwnProperty.call(props.filters, f.fieldname)
+        ),
+    )
+    .map((f) => ({
+      label: f.label,
+      fieldname: f.fieldname,
+      fieldtype: f.fieldtype,
+    }))
 }
 
 function applyQuickFilter(filter, value) {
@@ -850,6 +874,11 @@ function applyQuickFilter(filter, value) {
 
 function updateFilter(filters) {
   viewUpdated.value = true
+  for (const fieldname of props.lockedFilterFields) {
+    if (Object.prototype.hasOwnProperty.call(props.filters, fieldname)) {
+      filters[fieldname] = props.filters[fieldname]
+    }
+  }
   if (!defaultParams.value) {
     defaultParams.value = getParams()
   }

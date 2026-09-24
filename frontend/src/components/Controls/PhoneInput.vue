@@ -207,7 +207,7 @@ function findCountryByDialCode(dialCode) {
 
 // Validate using libphonenumber-js
 function validateNumber() {
-  const num = localNumber.value.replace(/[\s\-]/g, '')
+  const num = localNumber.value.replace(/[\s-]/g, '')
   if (!num) {
     validationError.value = ''
     return
@@ -286,7 +286,7 @@ function onBlur() {
 }
 
 function getCombinedValue() {
-  const num = localNumber.value.replace(/[\s\-]/g, '')
+  const num = localNumber.value.replace(/[\s-]/g, '')
   if (!num) return ''
   // Store in Frappe Desk Phone format: +CC-XXXXXXXXXX
   return selectedCountry.value.dialCode + '-' + num
