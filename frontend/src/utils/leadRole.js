@@ -65,6 +65,54 @@ export function roleFromViewFilters(filters) {
   return normalizeLeadRole(normalizeLeadViewFilters(filters).party_type)
 }
 
+function jsonList(value) {
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return []
+    }
+  }
+  return Array.isArray(value) ? value : []
+}
+
+export function normalizeLeadViewColumns(columns) {
+  const normalized = []
+  const seen = new Set()
+  for (const column of jsonList(columns)) {
+    if (!column || Array.isArray(column) || typeof column !== 'object') continue
+    const item = { ...column }
+    let key = item.key
+    if (LEGACY_LEAD_ROLE_FIELDS.includes(key)) {
+      key = 'party_type'
+      Object.assign(item, {
+        key,
+        label: 'Party Role',
+        type: 'Select',
+        options: LEAD_ROLES.map((value) => ({ label: value, value })),
+      })
+    }
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    normalized.push(item)
+  }
+  return normalized
+}
+
+export function normalizeLeadViewRows(rows) {
+  const normalized = []
+  const seen = new Set()
+  for (let fieldname of jsonList(rows)) {
+    if (LEGACY_LEAD_ROLE_FIELDS.includes(fieldname)) fieldname = 'party_type'
+    if (typeof fieldname !== 'string' || !fieldname || seen.has(fieldname)) {
+      continue
+    }
+    seen.add(fieldname)
+    normalized.push(fieldname)
+  }
+  return normalized
+}
+
 export function leadListRouteForRole(role) {
   if (role === BUYER_ROLE) return 'Buyers'
   if (role === SELLER_ROLE) return 'Sellers'
@@ -85,6 +133,8 @@ export function normalizeLegacyLeadViewRoute(view) {
   }
   const filters = normalizeLeadViewFilters(view.filters)
   view.filters = JSON.stringify(filters)
+  view.columns = JSON.stringify(normalizeLeadViewColumns(view.columns))
+  view.rows = JSON.stringify(normalizeLeadViewRows(view.rows))
   const role = normalizeLeadRole(filters.party_type)
   if (view.route_name !== 'Leads') return view
   if (role) view.route_name = leadListRouteForRole(role)

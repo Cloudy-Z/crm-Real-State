@@ -5,7 +5,9 @@ import {
   isBuyerLead,
   isSellerLead,
   leadListRouteForRole,
+  normalizeLeadViewColumns,
   normalizeLeadViewFilters,
+  normalizeLeadViewRows,
   normalizeLeadListRouteName,
   normalizeLegacyLeadViewRoute,
   normalizeLeadRole,
@@ -81,6 +83,25 @@ describe('Lead Party Role', () => {
     normalizeLegacyLeadViewRoute(view)
     expect(view.route_name).toBe('Buyers')
     expect(JSON.parse(view.filters)).toEqual({ party_type: BUYER_ROLE })
+  })
+
+  it('repairs legacy role columns and removes invalid saved rows', () => {
+    expect(
+      normalizeLeadViewColumns([
+        { key: 'lead_name', label: 'Name', type: 'Data' },
+        { key: 'custom_type', label: 'Type', type: 'Select' },
+        { key: 'party_type', label: 'Duplicate', type: 'Data' },
+      ]).map((column) => column.key),
+    ).toEqual(['lead_name', 'party_type'])
+    expect(
+      normalizeLeadViewRows([
+        'name',
+        null,
+        'custom_type',
+        'party_type',
+        'lead_type',
+      ]),
+    ).toEqual(['name', 'party_type'])
   })
 
   it('allows only known Lead list routes in detail breadcrumbs', () => {

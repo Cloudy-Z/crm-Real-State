@@ -325,7 +325,11 @@ import { viewsStore } from '@/stores/views'
 import { usersStore } from '@/stores/users'
 import { getMeta } from '@/stores/meta'
 import { isEmoji } from '@/utils'
-import { normalizeLeadViewFilters } from '@/utils/leadRole'
+import {
+  normalizeLeadViewColumns,
+  normalizeLeadViewFilters,
+  normalizeLeadViewRows,
+} from '@/utils/leadRole'
 import {
   Tooltip,
   createResource,
@@ -476,8 +480,12 @@ function getParams() {
   }
   const order_by = _view?.order_by || 'modified desc'
   const group_by_field = _view?.group_by_field || 'owner'
-  const columns = _view?.columns || ''
-  const rows = _view?.rows || ''
+  let columns = _view?.columns || ''
+  let rows = _view?.rows || ''
+  if (props.doctype === 'CRM Lead') {
+    columns = JSON.stringify(normalizeLeadViewColumns(columns))
+    rows = JSON.stringify(normalizeLeadViewRows(rows))
+  }
   const column_field = _view?.column_field || 'status'
   const title_field = _view?.title_field || ''
   const kanban_columns = _view?.kanban_columns || ''
