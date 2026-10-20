@@ -81,20 +81,20 @@
           </section>
 
           <section
-            v-if="isOwnerMeeting && !draft.cancelAction"
+            v-if="isCounterpartyMeeting && !draft.cancelAction"
             class="action-section"
           >
             <SectionTitle
               :number="isNewAction ? 2 : 1"
-              :title="__('Resale Owner Context')"
+              :title="counterpartyMeetingTitle"
               :description="
-                __('Meeting with Owner is limited to one active Resale unit.')
+                __(counterpartyMeetingDescription)
               "
             />
             <SelectField
-              v-model="draft.ownerInterestRow"
-              :label="__('Resale Unit / Owner')"
-              :options="ownerInterestOptions"
+              v-model="draft.counterpartyInterestRow"
+              :label="counterpartyMeetingSelectionLabel"
+              :options="counterpartyInterestOptions"
               :option-labels="rowLabels"
               required
             />
@@ -317,6 +317,62 @@
                 :label="__('Negotiating units')"
               />
             </div>
+
+            <div v-else-if="isClosing" class="grid gap-3 md:grid-cols-2">
+              <SelectField
+                v-model="draft.outcome"
+                :label="__('Contract Signing Outcome')"
+                :options="[
+                  'Pending Signing',
+                  'Contract Signed',
+                  'Return to Negotiation',
+                  'Buyer Withdrew',
+                ]"
+                required
+              />
+              <template v-if="draft.outcome === 'Contract Signed'">
+                <label class="field-label">
+                  {{ __('Contract Reference') }} *
+                  <input
+                    v-model.trim="draft.contractReference"
+                    type="text"
+                    class="field-input"
+                    required
+                  />
+                </label>
+                <label class="field-label">
+                  {{ __('Contract Signed Date') }} *
+                  <input
+                    v-model="draft.contractSignedDate"
+                    type="date"
+                    :max="todayIso"
+                    class="field-input"
+                    required
+                  />
+                </label>
+                <label class="field-label">
+                  {{ __('Signed Contract Attachment') }}
+                  <FileUploader
+                    :upload-args="{ private: true, doctype: 'CRM Lead', docname: leadId }"
+                    @success="(file) => (draft.signedContract = file.file_url)"
+                  >
+                    <template #default="{ openFileSelector, uploading, error }">
+                      <Button
+                        type="button"
+                        :label="draft.signedContract ? __('Replace private attachment') : __('Upload private contract (optional)')"
+                        :loading="uploading"
+                        @click="openFileSelector"
+                      />
+                      <p v-if="error" class="text-xs text-ink-red-3">{{ error }}</p>
+                    </template>
+                  </FileUploader>
+                  <p v-if="draft.signedContract" class="break-all text-xs text-ink-gray-6">{{ draft.signedContract }}</p>
+                  <span class="mt-1 block text-xs text-ink-gray-5">
+                    {{ __('Recommended, but not required to record a signature.') }}
+                  </span>
+                </label>
+              </template>
+            </div>
           </section>
 
           <section v-if="showInterestBlock" class="action-section">
@@ -342,11 +398,11 @@
                 ]"
                 required
               />
-              <template v-if="isInventoryInterest">
+              <template v-if="hasPropertyCriteria">
                 <LinkControl
                   v-model="draft.preferredDestination"
                   doctype="Real Estate Destination"
-                  :label="__('Preferred Destination')"
+                  :label="__('Preferred Destination (required)')"
                   :placeholder="__('Select a destination')"
                 />
                 <p
@@ -362,21 +418,52 @@
                   :label="__('Preferred Unit Type')"
                   :placeholder="__('Select a unit type')"
                 />
-                <label class="field-label">
-                  {{ __('Maximum Budget') }} *
-                  <input
-                    v-model="draft.buyerBudget"
-                    type="number"
-                    min="0"
-                    class="field-input"
-                    required
+                <CurrencyBudgetInput
+                  v-model="draft.buyerBudget"
+                  :label="__('Maximum Total Budget')"
+                  :currency="activeBudgetCurrency"
+                  :required="isInventoryInterest"
+                  :hint="__('Maximum complete purchase budget, not a monthly payment.')"
+                />
+                <CurrencyBudgetInput
+                  v-model="draft.downPaymentBudget"
+                  :label="__('Maximum Down Payment Budget')"
+                  :currency="activeBudgetCurrency"
+                  :hint="__('Optional maximum upfront-payment affordability.')"
+                />
+                <CurrencyBudgetInput
+                  v-model="draft.monthlyInstallmentBudget"
+                  :label="__('Maximum Monthly Installment Budget')"
+                  :currency="activeBudgetCurrency"
+                  :hint="__('Optional — per month.')"
+                />
+                <div class="field-label">
+                  {{ __('Budget Currency') }}
+                  <LinkControl
+                    v-model="draft.budgetCurrency"
+                    doctype="Currency"
+                    :placeholder="filterOptions.currency || __('Configure FCRM currency')"
                   />
-                </label>
+                </div>
+                <p
+                  v-if="!activeBudgetCurrency"
+                  class="md:col-span-2 rounded bg-surface-amber-1 px-3 py-2 text-xs text-ink-amber-3"
+                >
+                  {{ __('Currency is not configured. Set FCRM Settings currency before matching or saving budgets.') }}
+                </p>
+                <SelectField
+                  v-if="isInventoryInterest"
+                  v-model="draft.inventorySearchScope"
+                  :label="__('Inventory Search Scope')"
+                  :options="inventorySearchScopes"
+                  required
+                />
                 <LinkControl
                   v-model="draft.preferredProject"
                   doctype="Real Estate Project"
                   :label="__('Preferred Compound')"
                   :placeholder="__('Select a compound')"
+                  :filters="compoundLinkFilters"
                 />
                 <LinkControl
                   v-model="draft.preferredDeveloper"
@@ -390,10 +477,10 @@
                   :options="filterOptions.finishingTypes"
                 />
                 <label class="field-label">
-                  {{ __('Preferred Delivery Time') }}
+                  {{ __('Preferred Delivery Date') }}
                   <input
-                    v-model="draft.preferredDelivery"
-                    type="text"
+                    v-model="draft.preferredDeliveryDate"
+                    type="date"
                     class="field-input"
                   />
                 </label>
@@ -472,6 +559,22 @@
                 @click="loadMatches"
               />
             </div>
+            <p
+              v-if="draft.selectionNotice"
+              class="mb-3 rounded-lg border border-outline-amber-2 bg-surface-amber-1 p-3 text-sm text-ink-amber-3"
+            >
+              {{ draft.selectionNotice }}
+            </p>
+            <div v-if="selectedUnitCards.length" class="mb-3 flex flex-wrap gap-2">
+              <span
+                v-for="unit in selectedUnitCards"
+                :key="`selected-${unit.name}`"
+                class="rounded-full bg-surface-blue-2 px-2.5 py-1 text-xs font-medium text-ink-blue-3"
+              >
+                {{ unit.unit_number || unit.sku || unit.name }} ·
+                {{ unit.inventory_type || unit.interest_category || __('Unit') }}
+              </span>
+            </div>
 
             <div
               v-if="matchesLoading"
@@ -525,6 +628,7 @@
                       {{
                         formatPrice(
                           unit.effective_price ?? unit.total_gross ?? unit.price,
+                          unit.budget_currency || filterOptions.currency,
                         )
                       }}
                     </p>
@@ -560,6 +664,14 @@
                     class="rounded-full bg-surface-amber-1 px-2 py-1 text-xs text-ink-amber-3"
                   >
                     {{ gap }}
+                  </span>
+                  <span
+                    v-for="comparison in unitComparisons(unit)"
+                    :key="comparison.key"
+                    class="rounded-full px-2 py-1 text-xs"
+                    :class="comparison.className"
+                  >
+                    {{ comparison.label }}: {{ comparison.value }}
                   </span>
                 </div>
                 <Button
@@ -673,7 +785,7 @@
 
         <div class="mt-4 flex items-center justify-between gap-3 border-t pt-4">
           <p class="text-xs text-ink-gray-5">
-            {{ __('Nothing is saved until Submit Action succeeds.') }}
+            {{ __('Workflow changes are saved only when Submit Action succeeds. Optional uploads are private Lead attachments.') }}
           </p>
           <div class="flex gap-2">
             <Button
@@ -696,10 +808,32 @@
 </template>
 
 <script setup>
+import CurrencyBudgetInput from '@/components/Controls/CurrencyBudgetInput.vue'
 import LinkControl from '@/components/Controls/Link.vue'
+import {
+  CANONICAL_MEETING_PURPOSES,
+  INVENTORY_SEARCH_SCOPES,
+  buildInterestCriteriaPayload,
+  canBeginClosing,
+  closingNeedsSuccessor,
+  closingProjectedStatus,
+  compoundFilters,
+  compoundIsCompatible,
+  counterpartyMeetingPurpose,
+  formatCurrencyAmount,
+  hasValue,
+  isIsoCalendarDate,
+  isIsoDateOnOrBeforeToday,
+  isPropertyRequirement,
+  isTerminalInterestStatus,
+  isValidCurrencyAmount,
+  requestSnapshot,
+  scopeForCategory,
+  selectedUnitIsCompatible,
+} from '@/utils/interestWorkflow'
 import { isBuyerLead } from '@/utils/leadRole'
-import { Button, Dialog, call, toast } from 'frappe-ui'
-import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
+import { Button, Dialog, FileUploader, call, toast } from 'frappe-ui'
+import { computed, defineComponent, h, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const SectionTitle = defineComponent({
@@ -846,9 +980,18 @@ const filterOptions = reactive({
     'Fully Finished',
     'Ultra Super Lux',
   ],
+  currency: '',
 })
+const availableCompounds = ref([])
+const selectedUnitRecords = ref(new Map())
+const bundleRequestId = ref('')
+let compoundRequest = 0
+let matchRequest = 0
 const draft = reactive({})
 const router = useRouter()
+const inventorySearchScopes = INVENTORY_SEARCH_SCOPES
+const todayIso = frappeNowDateTime().slice(0, 10)
+const activeBudgetCurrency = computed(() => draft.budgetCurrency || filterOptions.currency || '')
 
 const actionType = computed(() => props.action?.action_type || '')
 const actionPurpose = computed(() => props.action?.purpose || '')
@@ -870,7 +1013,13 @@ const isGeneralCall = computed(
 )
 const isMeeting = computed(() => actionType.value === 'Meeting')
 const isOwnerMeeting = computed(
-  () => isMeeting.value && actionPurpose.value === 'Meeting with Owner',
+  () => isMeeting.value && actionPurpose.value === 'Owner Meeting',
+)
+const isDeveloperMeeting = computed(
+  () => isMeeting.value && actionPurpose.value === 'Developer Meeting',
+)
+const isCounterpartyMeeting = computed(
+  () => isOwnerMeeting.value || isDeveloperMeeting.value,
 )
 const isExploreMeeting = computed(
   () => isMeeting.value && actionPurpose.value === 'Explore Meeting',
@@ -880,6 +1029,9 @@ const isSendOffer = computed(() => actionType.value === 'Send Offer')
 const isOfferDecision = computed(() => actionType.value === 'Offer Decision')
 const isNegotiation = computed(
   () => actionType.value === 'Negotiation Follow-up',
+)
+const isClosing = computed(
+  () => actionType.value === 'Closing' && actionPurpose.value === 'Contract Signing',
 )
 const canSchedule = computed(
   () =>
@@ -913,6 +1065,9 @@ const showInterestBlock = computed(
 const isInventoryInterest = computed(() =>
   ['Resale', 'Primary'].includes(draft.interestCategory),
 )
+const hasPropertyCriteria = computed(() =>
+  isPropertyRequirement(draft.interestCategory, draft.internationalType),
+)
 const showSmartMatch = computed(
   () => showInterestBlock.value && isInventoryInterest.value,
 )
@@ -922,6 +1077,7 @@ const shouldRequireNextAction = computed(() => {
   if (actionType.value === 'Add Interest') return true
   if (!showResultSections.value) return false
   if (draft.outcome === 'Rescheduled') return false
+  if (isClosing.value) return closingNeedsSuccessor(draft.outcome)
   if (isInitialQualification.value) {
     if (draft.contactResult !== 'Answered') return Boolean(draft.contactResult)
     return draft.qualification === 'Interested'
@@ -929,9 +1085,7 @@ const shouldRequireNextAction = computed(() => {
   if (isOfferDecision.value && draft.offerDecision === 'Change Requirements')
     return true
   if (scopedInterest.value)
-    return !['Rejected', 'Superseded', 'Fulfilled', 'Cancelled'].includes(
-      projectedInterestStatus(),
-    )
+    return !isTerminalInterestStatus(projectedInterestStatus())
   return (
     props.context?.qualification === 'Interested' || showInterestBlock.value
   )
@@ -944,13 +1098,14 @@ const scopedRows = computed(() => {
   const rows = props.context?.interest_rows || []
   return names.size ? rows.filter((row) => names.has(row.name)) : rows
 })
-const ownerRows = computed(() =>
-  scopedRows.value.filter(
-    (row) => row.interest_category === 'Resale' && row.unit,
-  ),
+const counterpartyRows = computed(() =>
+  scopedRows.value.filter((row) => {
+    const status = row.workflow_status || scopedInterest.value?.workflow_status || ''
+    return counterpartyMeetingPurpose(row, status) === actionPurpose.value
+  }),
 )
-const ownerInterestOptions = computed(() =>
-  ownerRows.value.map((row) => row.name),
+const counterpartyInterestOptions = computed(() =>
+  counterpartyRows.value.map((row) => row.name),
 )
 const offerRowOptions = computed(() => scopedRows.value.map((row) => row.name))
 const scopedInterest = computed(() =>
@@ -966,6 +1121,23 @@ const nextActionLabels = computed(() =>
   Object.fromEntries(
     nextActionOptions.value.map((item) => [item.key, item.label]),
   ),
+)
+const compoundLinkFilters = computed(() =>
+  compoundFilters(draft.preferredDestination, draft.preferredDeveloper),
+)
+const selectedUnitCards = computed(() =>
+  draft.selectedUnits.map((name) => selectedUnitRecords.value.get(name)).filter(Boolean),
+)
+const counterpartyMeetingTitle = computed(() =>
+  isDeveloperMeeting.value ? __('Primary Developer Context') : __('Resale Owner Context'),
+)
+const counterpartyMeetingDescription = computed(() =>
+  isDeveloperMeeting.value
+    ? __('Developer Meeting is limited to one active Primary unit with its actual developer and no seller owner.')
+    : __('Owner Meeting is limited to one active seller-owned Resale unit.'),
+)
+const counterpartyMeetingSelectionLabel = computed(() =>
+  isDeveloperMeeting.value ? __('Primary Unit / Developer') : __('Resale Unit / Owner'),
 )
 
 const dialogTitle = computed(
@@ -1003,6 +1175,11 @@ const resultSectionDescription = computed(() => {
 })
 
 function resetDraft() {
+  bundleRequestId.value = createClientRequestId()
+  compoundRequest += 1
+  matchRequest += 1
+  selectedUnitRecords.value = new Map()
+  const snapshot = requestSnapshot(scopedInterest.value || {}, props.lead || {})
   Object.assign(draft, {
     executionTiming: 'Do Now',
     scheduledStart: '',
@@ -1024,7 +1201,7 @@ function resetDraft() {
         props.action?.interest_row_names ||
         []),
     ],
-    ownerInterestRow: isOwnerMeeting.value
+    counterpartyInterestRow: isCounterpartyMeeting.value
       ? (props.action?.interest_rows ||
           props.action?.interest_row_names ||
           [])[0] || ''
@@ -1036,34 +1213,22 @@ function resetDraft() {
     interestCategory: isMatchRequested.value
       ? scopedInterest.value?.interest_category || ''
       : '',
-    preferredDestination:
-      scopedInterest.value?.requested_destination ||
-      props.lead?.preferred_destination ||
-      '',
+    preferredDestination: snapshot.preferredDestination,
     legacyPreferredArea:
       scopedInterest.value?.requested_area || props.lead?.preferred_area || '',
-    preferredUnitType:
-      scopedInterest.value?.requested_unit_type ||
-      props.lead?.preferred_unit_type ||
-      '',
-    buyerBudget:
-      scopedInterest.value?.requested_budget || props.lead?.buyer_budget || '',
-    preferredProject:
-      scopedInterest.value?.requested_project ||
-      props.lead?.preferred_compound ||
-      '',
-    preferredDeveloper:
-      scopedInterest.value?.requested_developer ||
-      props.lead?.preferred_developer ||
-      '',
-    preferredFinishing:
-      scopedInterest.value?.requested_finishing_type ||
-      props.lead?.preferred_finishing_type ||
-      '',
-    preferredDelivery:
-      scopedInterest.value?.requested_delivery_time ||
-      props.lead?.preferred_delivery_time ||
-      '',
+    preferredUnitType: snapshot.preferredUnitType,
+    buyerBudget: snapshot.buyerBudget,
+    downPaymentBudget: snapshot.downPaymentBudget,
+    monthlyInstallmentBudget: snapshot.monthlyInstallmentBudget,
+    budgetCurrency: snapshot.budgetCurrency,
+    inventorySearchScope: scopeForCategory(
+      isMatchRequested.value ? scopedInterest.value?.interest_category : '',
+      snapshot.inventorySearchScope,
+    ),
+    preferredProject: snapshot.preferredProject,
+    preferredDeveloper: snapshot.preferredDeveloper,
+    preferredFinishing: snapshot.preferredFinishing,
+    preferredDeliveryDate: snapshot.preferredDeliveryDate,
     requestNotes: '',
     internationalType: '',
     internationalCountry: '',
@@ -1073,6 +1238,10 @@ function resetDraft() {
     strictFilters: false,
     matchSearch: '',
     updateInterest: false,
+    contractReference: '',
+    contractSignedDate: '',
+    signedContract: '',
+    selectionNotice: '',
     nextActionKey: '',
     nextTiming: 'Do Now',
     nextScheduledStart: '',
@@ -1091,7 +1260,10 @@ async function loadFilterOptions() {
   try {
     const result = await call(
       'real_estate_crm_customs.api.get_property_match_filter_options',
-      { interest_category: draft.interestCategory },
+      {
+        interest_category: draft.interestCategory,
+        inventory_search_scope: draft.inventorySearchScope || null,
+      },
     )
     if (result?.unit_types?.length)
       filterOptions.unitTypes = mergeCurrentOption(
@@ -1103,6 +1275,10 @@ async function loadFilterOptions() {
         result.finishing_types,
         draft.preferredFinishing,
       )
+    if (result?.currency) {
+      filterOptions.currency = result.currency
+      if (!draft.budgetCurrency) draft.budgetCurrency = result.currency
+    }
   } catch {
     // Schema defaults remain available when inventory options cannot load.
   }
@@ -1110,6 +1286,7 @@ async function loadFilterOptions() {
 
 async function loadMatches() {
   if (!validateInterestRequirements({ requireResolution: false })) return
+  const request = ++matchRequest
   matchesLoading.value = true
   try {
     const result = await call(
@@ -1118,17 +1295,44 @@ async function loadMatches() {
         lead: props.leadId,
         interest: scopedInterest.value?.name || null,
         interest_category: draft.interestCategory,
+        inventory_search_scope: scopeForCategory(
+          draft.interestCategory,
+          draft.inventorySearchScope,
+        ),
         search: draft.matchSearch || null,
-        destination: draft.preferredDestination || null,
-        project: draft.preferredProject || null,
-        developer: draft.preferredDeveloper || null,
+        destination: draft.preferredDestination || '',
+        project: draft.preferredProject || '',
+        developer: draft.preferredDeveloper || '',
         physical_unit_type: draft.preferredUnitType || null,
         finishing_type: draft.preferredFinishing || null,
-        max_price: draft.buyerBudget || null,
+        max_price: hasValue(draft.buyerBudget) ? draft.buyerBudget : null,
+        down_payment_budget: hasValue(draft.downPaymentBudget)
+          ? draft.downPaymentBudget
+          : '',
+        monthly_installment_budget: hasValue(draft.monthlyInstallmentBudget)
+          ? draft.monthlyInstallmentBudget
+          : '',
+        delivery_date: draft.preferredDeliveryDate || '',
+        budget_currency: draft.budgetCurrency || filterOptions.currency || null,
         strict_filters: draft.strictFilters ? 1 : 0,
       },
     )
+    if (request !== matchRequest || !show.value) return
     matches.value = result?.units || []
+    matches.value.forEach((unit) => selectedUnitRecords.value.set(unit.name, unit))
+    clearIncompatibleSelectedUnits()
+    if (result?.currency) {
+      filterOptions.currency = result.currency
+      if (!draft.budgetCurrency) draft.budgetCurrency = result.currency
+    }
+    if (
+      draft.strictFilters &&
+      (hasValue(draft.downPaymentBudget) || hasValue(draft.monthlyInstallmentBudget)) &&
+      !matches.value.length
+    )
+      draft.selectionNotice = __(
+        'Exact finance filters exclude units with unknown payment-plan data. Clear Exact filters to compare those units without inventing affordability.',
+      )
   } catch (error) {
     toast.error(
       error.messages?.[0] ||
@@ -1136,7 +1340,7 @@ async function loadMatches() {
         __('Could not load matching properties.'),
     )
   } finally {
-    matchesLoading.value = false
+    if (request === matchRequest) matchesLoading.value = false
   }
 }
 
@@ -1145,15 +1349,35 @@ function validateInterestRequirements({ requireResolution = true } = {}) {
     toast.error(__('Select an interest category.'))
     return false
   }
-  if (isInventoryInterest.value) {
+  if (hasPropertyCriteria.value) {
     if (
       !draft.preferredDestination ||
-      !draft.preferredUnitType ||
-      !draft.buyerBudget
+      (isInventoryInterest.value && (!draft.preferredUnitType || !hasValue(draft.buyerBudget)))
     ) {
       toast.error(__('Destination, unit type, and maximum budget are required.'))
       return false
     }
+    if (!isValidCurrencyAmount(draft.buyerBudget, { required: isInventoryInterest.value })) {
+      toast.error(__('Maximum total budget must be zero or a positive amount.'))
+      return false
+    }
+    if (
+      !isValidCurrencyAmount(draft.downPaymentBudget) ||
+      !isValidCurrencyAmount(draft.monthlyInstallmentBudget)
+    ) {
+      toast.error(__('Optional budget amounts must be zero or positive.'))
+      return false
+    }
+    if (!draft.budgetCurrency && !filterOptions.currency) {
+      toast.error(
+        __('Set a budget currency before matching or saving; no currency is assumed.'),
+      )
+      return false
+    }
+  }
+  if (draft.preferredDeliveryDate && !isIsoCalendarDate(draft.preferredDeliveryDate)) {
+    toast.error(__('Select a valid delivery date.'))
+    return false
   }
   if (draft.interestCategory === 'Brokerage Request' && !draft.requestNotes) {
     toast.error(__('Brokerage requirements are mandatory.'))
@@ -1187,11 +1411,87 @@ function isUnitSelected(name) {
 }
 
 function toggleUnit(name) {
+  const unit = matches.value.find((item) => item.name === name)
+  if (unit) selectedUnitRecords.value.set(name, unit)
   draft.requestedUnit = false
   const selected = new Set(draft.selectedUnits)
   if (selected.has(name)) selected.delete(name)
   else selected.add(name)
   draft.selectedUnits = [...selected]
+}
+
+async function loadCompounds() {
+  const request = ++compoundRequest
+  if (!draft.preferredDestination) {
+    availableCompounds.value = []
+    if (draft.preferredProject) draft.preferredProject = ''
+    return
+  }
+  try {
+    const result = await call('real_estate_crm_customs.api.get_requirement_compounds', {
+      destination: draft.preferredDestination,
+      developer: draft.preferredDeveloper || null,
+    })
+    if (request !== compoundRequest || !show.value) return
+    availableCompounds.value = result?.compounds || []
+    if (result?.currency) {
+      filterOptions.currency = result.currency
+      if (!draft.budgetCurrency) draft.budgetCurrency = result.currency
+    }
+    const currentCompound = availableCompounds.value.find((item) => item.name === draft.preferredProject)
+    if (draft.preferredProject && (!currentCompound || !compoundIsCompatible(currentCompound,
+      draft.preferredDestination, draft.preferredDeveloper))) {
+      draft.preferredProject = ''
+      draft.selectionNotice = __('Incompatible Compound cleared after Destination or Developer changed.')
+    }
+    if (!draft.preferredProject && draft.preferredDeveloper && availableCompounds.value.length === 1) {
+      draft.preferredProject = availableCompounds.value[0].name
+    }
+  } catch (error) {
+    if (request === compoundRequest) {
+      availableCompounds.value = []
+      toast.error(error.messages?.[0] || error.message || __('Could not load eligible Compounds.'))
+    }
+  }
+}
+
+function clearIncompatibleSelectedUnits() {
+  const criteria = {
+    preferredDestination: draft.preferredDestination,
+    preferredProject: draft.preferredProject,
+    preferredDeveloper: draft.preferredDeveloper,
+    inventorySearchScope: draft.inventorySearchScope,
+  }
+  const incompatible = selectedUnitCards.value.filter(
+    (unit) => !selectedUnitIsCompatible(unit, criteria),
+  )
+  if (!incompatible.length) return
+  const rejected = new Set(incompatible.map((unit) => unit.name))
+  draft.selectedUnits = draft.selectedUnits.filter((name) => !rejected.has(name))
+  draft.selectionNotice = __(
+    'Incompatible draft unit selections were cleared after your Destination, Developer, Compound, or search-scope change.',
+  )
+}
+
+function unitComparisons(unit) {
+  const affordability = unit.affordability || {}
+  const labels = [
+    ['total_budget', __('Total'), affordability.total_budget],
+    ['down_payment', __('Upfront'), affordability.down_payment],
+    ['monthly_installment', __('Monthly'), affordability.monthly_installment],
+    ['delivery', __('Delivery'), affordability.delivery],
+  ]
+  return labels.map(([key, label, value]) => ({
+    key,
+    label,
+    value: value || __('Comparison unavailable'),
+    className:
+      value === 'Within budget' || value === 'Within deadline'
+        ? 'bg-surface-green-1 text-ink-green-3'
+        : value === 'Over budget' || value === 'Later than requested'
+          ? 'bg-surface-amber-1 text-ink-amber-3'
+          : 'bg-surface-gray-2 text-ink-gray-7',
+  }))
 }
 
 function openUnit(unit) {
@@ -1207,9 +1507,9 @@ function onRequestedUnitChange() {
   if (draft.requestedUnit) draft.selectedUnits = []
 }
 
-function formatPrice(value) {
+function formatPrice(value, currency = activeBudgetCurrency.value) {
   if (value === null || value === undefined || value === '') return '—'
-  return Number(value).toLocaleString()
+  return formatCurrencyAmount(value, currency)
 }
 
 function startCall() {
@@ -1221,9 +1521,29 @@ function actionKey(item) {
   return `${item.action_type}::${item.purpose}`
 }
 
+function counterpartyOption(row, status, scope = {}) {
+  const purpose = counterpartyMeetingPurpose(row, status)
+  if (!purpose) return []
+  const isOwner = purpose === 'Owner Meeting'
+  return [
+    {
+      ...scope,
+      action_type: 'Meeting',
+      purpose,
+      label: isOwner
+        ? __('Meet this Resale unit owner')
+        : __('Meet this Primary unit developer'),
+      interest_rows: scope.interest_rows || [row.name],
+      unit: row.unit,
+      units: row.unit ? [row.unit] : [],
+    },
+  ]
+}
+
 function normalizedPolicyOptions() {
   return (props.context?.allowed_next_actions || [])
-    .filter((item) => item?.action_type)
+    .filter((item) => item?.action_type &&
+      (item.action_type !== 'Meeting' || CANONICAL_MEETING_PURPOSES.includes(item.purpose)))
     .map((item) => ({
       ...item,
       key: actionKey(item),
@@ -1240,11 +1560,6 @@ function interestDrivenOptions() {
     },
     {
       action_type: 'Meeting',
-      purpose: 'General Meeting',
-      label: __('General meeting'),
-    },
-    {
-      action_type: 'Meeting',
       purpose: 'Explore Meeting',
       label: __('Explore requirements meeting'),
     },
@@ -1255,15 +1570,6 @@ function interestDrivenOptions() {
       purpose: 'Offer Follow-up',
       label: __('Send selected unit offers by WhatsApp'),
       units: [...draft.selectedUnits],
-    })
-  }
-  if (draft.interestCategory === 'Resale' && draft.selectedUnits.length === 1) {
-    options.push({
-      action_type: 'Meeting',
-      purpose: 'Meeting with Owner',
-      label: __('Meet the Resale unit owner'),
-      units: [...draft.selectedUnits],
-      unit: draft.selectedUnits[0],
     })
   }
   return options.map((item) => ({ ...item, key: actionKey(item) }))
@@ -1289,18 +1595,15 @@ function offerDecisionOptions() {
         interest_rows: [draft.selectedOffer],
         unit: selectedRow?.unit,
       },
-      ...(selectedRow?.interest_category === 'Resale'
-        ? [
-            {
-              action_type: 'Meeting',
-              purpose: 'Meeting with Owner',
-              label: __('Meet the Resale unit owner'),
-              interest_rows: [draft.selectedOffer],
-              unit: selectedRow?.unit,
-              units,
-            },
-          ]
-        : []),
+      ...counterpartyOption(selectedRow, 'Offer Accepted'),
+      {
+        action_type: 'Closing',
+        purpose: 'Contract Signing',
+        label: __('Begin closing — contract signing'),
+        interest_rows: [draft.selectedOffer],
+        unit: selectedRow?.unit,
+        units,
+      },
     ].map((item) => ({ ...item, key: actionKey(item) }))
   }
   if (draft.offerDecision === 'Change Requirements')
@@ -1346,6 +1649,7 @@ function projectedInterestStatus() {
     )
       return 'Negotiating'
   }
+  if (isClosing.value) return closingProjectedStatus(draft.outcome, current)
   return current
 }
 
@@ -1435,13 +1739,25 @@ function independentInterestOptions() {
         label: __('Schedule or hold this unit showing'),
       },
     )
-    if (row.interest_category === 'Resale')
+    options.push(...counterpartyOption(row, status, scope))
+    if (canBeginClosing(status))
       options.push({
         ...scope,
-        action_type: 'Meeting',
-        purpose: 'Meeting with Owner',
-        label: __('Meet this Resale unit owner'),
+        action_type: 'Closing',
+        purpose: 'Contract Signing',
+        label: __('Begin closing — contract signing'),
       })
+  }
+  if (status === 'Closing') {
+    options.push(
+      {
+        ...scope,
+        action_type: 'Closing',
+        purpose: 'Contract Signing',
+        label: __('Contract-signing follow-up'),
+      },
+      ...counterpartyOption(row, status, scope),
+    )
   }
   return options.map((item) => ({ ...item, key: actionKey(item) }))
 }
@@ -1451,7 +1767,8 @@ function buildNextActionOptions() {
   if (scopedInterest.value) options = independentInterestOptions()
   if (showInterestBlock.value) options = interestDrivenOptions()
   if (isOfferDecision.value) options = offerDecisionOptions()
-  if (isSendOffer.value) options = []
+  if (isSendOffer.value || (isClosing.value && draft.outcome === 'Contract Signed'))
+    options = []
   const seen = new Set()
   return options.filter((item) => {
     if (!item?.action_type || seen.has(item.key)) return false
@@ -1497,13 +1814,7 @@ function buildInterestPayload() {
     international_type: draft.internationalType || null,
     international_country: draft.internationalCountry || null,
     international_details: draft.internationalDetails || null,
-    preferred_destination: draft.preferredDestination || null,
-    preferred_unit_type: draft.preferredUnitType || null,
-    buyer_budget: draft.buyerBudget || null,
-    preferred_compound: draft.preferredProject || null,
-    preferred_developer: draft.preferredDeveloper || null,
-    preferred_finishing_type: draft.preferredFinishing || null,
-    preferred_delivery_time: draft.preferredDelivery || null,
+    ...buildInterestCriteriaPayload(draft),
   }
 }
 
@@ -1532,6 +1843,18 @@ function validateResult() {
   }
   if (isMeeting.value && !draft.outcome)
     throw new Error(__('Select the meeting outcome.'))
+  if (isClosing.value) {
+    if (!draft.outcome)
+      throw new Error(__('Select the contract-signing outcome.'))
+    if (draft.outcome === 'Contract Signed') {
+      if (!draft.contractReference)
+        throw new Error(__('Contract reference is required for Contract Signed.'))
+      if (!isIsoDateOnOrBeforeToday(draft.contractSignedDate))
+        throw new Error(
+          __('Contract signed date is required and cannot be in the future.'),
+        )
+    }
+  }
   if (isShowing.value && !draft.outcome)
     throw new Error(__('Select the showing outcome.'))
   if (isShowing.value && draft.outcome === 'Completed' && !draft.unitOutcome)
@@ -1574,6 +1897,18 @@ function buildResultPayload() {
     decision: draft.offerDecision || null,
     selected_offer: draft.selectedOffer || null,
     interest_rows: [...draft.selectedInterestRows],
+    contract_reference:
+      isClosing.value && draft.outcome === 'Contract Signed'
+        ? draft.contractReference
+        : null,
+    contract_signed_date:
+      isClosing.value && draft.outcome === 'Contract Signed'
+        ? draft.contractSignedDate
+        : null,
+    signed_contract:
+      isClosing.value && draft.outcome === 'Contract Signed'
+        ? draft.signedContract || null
+        : null,
   }
   if (isSendOffer.value) result.outcome = 'Dispatched'
   if (isShowing.value && draft.showingInterestRow)
@@ -1586,15 +1921,15 @@ function buildResultPayload() {
 function buildActionPayload() {
   if (props.action?.name) return { name: props.action.name }
   const definition = props.action || {}
-  const ownerRow = ownerRows.value.find(
-    (row) => row.name === draft.ownerInterestRow,
+  const counterpartyRow = counterpartyRows.value.find(
+    (row) => row.name === draft.counterpartyInterestRow,
   )
   const showingRow = scopedRows.value.find(
     (row) => row.name === draft.showingInterestRow,
   )
-  const interestRows = isOwnerMeeting.value
-    ? draft.ownerInterestRow
-      ? [draft.ownerInterestRow]
+  const interestRows = isCounterpartyMeeting.value
+    ? draft.counterpartyInterestRow
+      ? [draft.counterpartyInterestRow]
       : []
     : isShowing.value
       ? draft.showingInterestRow
@@ -1611,7 +1946,7 @@ function buildActionPayload() {
       ? draft.scheduledStart
       : frappeNowDateTime(),
     interest_rows: interestRows,
-    unit: ownerRow?.unit || showingRow?.unit || definition.unit || null,
+    unit: counterpartyRow?.unit || showingRow?.unit || definition.unit || null,
     notes: draft.notes || null,
   }
 }
@@ -1635,7 +1970,7 @@ async function submitBundle() {
       action: buildActionPayload(),
       result: buildResultPayload(),
       interest,
-      client_request_id: createClientRequestId(),
+      client_request_id: bundleRequestId.value || (bundleRequestId.value = createClientRequestId()),
     }
     submitting.value = true
     const result = await call(
@@ -1686,10 +2021,43 @@ function close() {
 watch(
   () => draft.interestCategory,
   async (category) => {
+    matchRequest += 1
     matches.value = []
     draft.selectedUnits = []
     draft.requestedUnit = false
+    draft.inventorySearchScope = draft.inventorySearchScope === 'Both'
+      ? 'Both' : scopeForCategory(category)
     if (category) await loadFilterOptions()
+  },
+)
+
+watch(
+  () => [draft.preferredDestination, draft.preferredDeveloper],
+  async () => {
+    if (!showInterestBlock.value || !hasPropertyCriteria.value) return
+    await loadCompounds()
+    clearIncompatibleSelectedUnits()
+  },
+)
+
+watch(
+  () => [draft.preferredProject, draft.inventorySearchScope],
+  async () => {
+    if (draft.preferredProject && showInterestBlock.value) {
+      let compound = availableCompounds.value.find((item) => item.name === draft.preferredProject)
+      if (!compound && draft.preferredDestination) {
+        const result = await call('real_estate_crm_customs.api.get_requirement_compounds', {
+          destination: draft.preferredDestination,
+        })
+        compound = result?.compounds?.find((item) => item.name === draft.preferredProject)
+      }
+      if (compound && compound.destination === draft.preferredDestination) {
+        draft.preferredDeveloper = compound.developer || ''
+      } else if (draft.preferredProject) {
+        draft.preferredProject = ''
+      }
+    }
+    clearIncompatibleSelectedUnits()
   },
 )
 
@@ -1700,18 +2068,24 @@ watch(
     draft.preferredDestination,
     draft.preferredUnitType,
     draft.buyerBudget,
+    draft.downPaymentBudget,
+    draft.monthlyInstallmentBudget,
+    draft.preferredDeliveryDate,
+    draft.budgetCurrency,
+    draft.inventorySearchScope,
     draft.preferredProject,
     draft.preferredDeveloper,
     draft.preferredFinishing,
     draft.strictFilters,
   ],
   () => {
+    matchRequest += 1
     clearTimeout(matchRefreshTimer)
+    clearIncompatibleSelectedUnits()
     if (
       !showSmartMatch.value ||
       !draft.preferredDestination ||
-      !draft.preferredUnitType ||
-      !draft.buyerBudget
+      (isInventoryInterest.value && (!draft.preferredUnitType || !hasValue(draft.buyerBudget)))
     )
       return
     matchRefreshTimer = setTimeout(loadMatches, 450)
@@ -1720,7 +2094,13 @@ watch(
 
 watch(show, (value) => {
   if (value) resetDraft()
+  else {
+    compoundRequest += 1
+    matchRequest += 1
+    clearTimeout(matchRefreshTimer)
+  }
 })
+onBeforeUnmount(() => clearTimeout(matchRefreshTimer))
 </script>
 
 <style scoped>

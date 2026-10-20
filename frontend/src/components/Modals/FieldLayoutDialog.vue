@@ -41,6 +41,7 @@
             :theme="action.theme"
             :icon="action.icon"
             :loading="action.loading"
+            :disabled="dependencyPending > 0"
             @click="action.onClick"
           />
         </div>
@@ -60,7 +61,7 @@ const props = defineProps({
   title: { type: String, default: 'Dialog' },
   doctype: { type: String, default: '' },
   tabs: { type: Array, default: null },
-  fields: { type: Array, default: null },
+  fields: { type: [Array, Function], default: null },
   fieldnames: { type: Array, default: null },
   defaults: { type: Object, default: () => ({}) },
   required: { type: Array, default: () => [] },
@@ -68,6 +69,7 @@ const props = defineProps({
   actions: { type: Array, default: null },
   onSubmit: { type: Function, default: null },
   onCancel: { type: Function, default: null },
+  onChange: { type: Function, default: null },
   submitLabel: { type: String, default: 'Submit' },
   cancelLabel: { type: String, default: null },
 })
@@ -77,6 +79,7 @@ const emit = defineEmits(['resolve'])
 const show = ref(true)
 const error = ref('')
 const loading = ref(false)
+const dependencyPending = ref(0)
 let resolved = false
 
 function submit(result) {
@@ -98,6 +101,18 @@ const fieldLayoutContext = reactive({
   fieldPropertyOverrides: {},
   fieldHtmlMap: {},
 })
+
+watch(() => ({ ...localDoc }), async (_values, previous) => {
+  if (!props.onChange || !show.value) return
+  dependencyPending.value += 1
+  try {
+    await props.onChange(localDoc, previous || {})
+  } catch (err) {
+    error.value = err.messages?.[0] || err.message || __('Could not update dependent fields.')
+  } finally {
+    dependencyPending.value -= 1
+  }
+}, { immediate: true })
 
 // ── Layout resolution ──
 // Priority: tabs > fields > doctype+fieldnames > doctype (Quick Entry)
@@ -175,7 +190,8 @@ if (props.tabs || props.fields) {
 }
 
 const resolvedTabs = computed(() => {
-  let tabs = props.tabs || (props.fields ? wrapFieldsInTab(props.fields) : null)
+  const fields = typeof props.fields === 'function' ? props.fields(localDoc) : props.fields
+  let tabs = props.tabs || (fields ? wrapFieldsInTab(fields) : null)
   if (!tabs) tabs = fetchedTabs.value
   if (!tabs) return null
   return applyRequiredFlags(tabs, props.required)
@@ -184,6 +200,7 @@ const resolvedTabs = computed(() => {
 // ── Validation ──
 
 function validate() {
+  if (dependencyPending.value > 0) return false
   error.value = ''
   const allFields = []
   for (const tab of resolvedTabs.value || []) {

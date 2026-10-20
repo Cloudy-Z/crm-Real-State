@@ -89,6 +89,19 @@
             <label
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
             >
+              {{ __('Inventory Search Scope') }}
+              <select
+                v-model="localScope"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+              >
+                <option v-for="scope in searchScopes" :key="scope" :value="scope">
+                  {{ __(scope) }}
+                </option>
+              </select>
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
               {{ __('Unit Type') }}
               <select
                 v-model="filters.unitType"
@@ -105,16 +118,17 @@
               </select>
             </label>
             <LinkControl
-              v-model="filters.project"
-              doctype="Real Estate Project"
-              :label="__('Compound')"
-              :placeholder="__('Select a compound')"
-            />
-            <LinkControl
               v-model="filters.developer"
               doctype="Property Developer"
               :label="__('Developer')"
               :placeholder="__('Select a developer')"
+            />
+            <LinkControl
+              v-model="filters.project"
+              doctype="Real Estate Project"
+              :label="__('Compound')"
+              :placeholder="__('Select a compound')"
+              :filters="compoundLinkFilters"
             />
             <label
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
@@ -134,32 +148,47 @@
                 </option>
               </select>
             </label>
+            <CurrencyBudgetInput
+              v-model="filters.minPrice"
+              :label="__('Minimum Total Price')"
+              :currency="activeCurrency"
+              :hint="__('Optional minimum complete purchase price.')"
+            />
+            <CurrencyBudgetInput
+              v-model="filters.maxPrice"
+              :label="__('Maximum Total Budget')"
+              :currency="activeCurrency"
+              :hint="__('Maximum complete purchase budget.')"
+            />
+            <CurrencyBudgetInput
+              v-model="filters.downPaymentBudget"
+              :label="__('Maximum Down Payment')"
+              :currency="activeCurrency"
+              :hint="__('Optional maximum upfront payment.')"
+            />
+            <CurrencyBudgetInput
+              v-model="filters.monthlyInstallmentBudget"
+              :label="__('Maximum Monthly Installment')"
+              :currency="activeCurrency"
+              :hint="__('Optional — per month.')"
+            />
             <label
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
             >
-              {{ __('Minimum Price') }}
+              {{ __('Preferred Delivery Date') }}
               <input
-                v-model="filters.minPrice"
-                type="number"
-                min="0"
-                :placeholder="__('From')"
+                v-model="filters.deliveryDate"
+                type="date"
                 class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
-                @keyup.enter="fetchUnits"
+                @change="fetchUnits"
               />
             </label>
-            <label
-              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
-            >
-              {{ __('Maximum Price') }}
-              <input
-                v-model="filters.maxPrice"
-                type="number"
-                min="0"
-                :placeholder="__('To')"
-                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
-                @keyup.enter="fetchUnits"
-              />
-            </label>
+            <LinkControl
+              v-model="filters.budgetCurrency"
+              doctype="Currency"
+              :label="__('Budget Currency')"
+              :placeholder="currency || __('Set currency')"
+            />
           </div>
 
           <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -316,6 +345,17 @@
               </span>
             </div>
 
+            <div class="mt-3 flex flex-wrap gap-1.5">
+              <span
+                v-for="comparison in unitComparisons(unit)"
+                :key="comparison.key"
+                class="rounded-full px-2 py-1 text-xs font-medium"
+                :class="comparison.className"
+              >
+                {{ comparison.label }}: {{ __(comparison.value) }}
+              </span>
+            </div>
+
             <div class="mt-3 flex items-center justify-between gap-3">
               <span class="text-xs text-ink-gray-5">
                 {{ __('Reference') }}:
@@ -375,7 +415,16 @@
 </template>
 
 <script setup>
+import CurrencyBudgetInput from '@/components/Controls/CurrencyBudgetInput.vue'
 import LinkControl from '@/components/Controls/Link.vue'
+import {
+  INVENTORY_SEARCH_SCOPES,
+  compoundFilters,
+  compoundIsCompatible,
+  formatCurrencyAmount,
+  scopeForCategory,
+  selectedUnitIsCompatible,
+} from '@/utils/interestWorkflow'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { Button, Dialog, call, toast } from 'frappe-ui'
 import { useRouter } from 'vue-router'
@@ -408,6 +457,7 @@ const props = defineProps({
   leadId: { type: String, required: true },
   interestId: { type: String, default: '' },
   interestCategory: { type: String, default: 'Resale' },
+  inventorySearchScope: { type: String, default: 'Both' },
   includeUnit: { type: String, default: '' },
   initialCriteria: { type: Object, default: () => ({}) },
   selectionMode: {
@@ -415,10 +465,9 @@ const props = defineProps({
     default: 'single',
     validator: (value) => ['single', 'multiple'].includes(value),
   },
-  linkOnSubmit: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['selected', 'units-added', 'cancelled'])
+const emit = defineEmits(['selected', 'cancelled'])
 const show = defineModel({ type: Boolean, default: false })
 const loading = ref(false)
 const submitting = ref(false)
@@ -426,10 +475,14 @@ const units = ref([])
 const selectedUnits = ref([])
 const selectedRecords = ref(new Map())
 const localCategory = ref(props.interestCategory)
+const localScope = ref(scopeForCategory(props.interestCategory, props.inventorySearchScope))
 const selectionCommitted = ref(false)
 const matchProfile = ref({})
 const smartMatchActive = ref(false)
 const strictFilters = ref(false)
+const currency = ref('')
+const availableCompounds = ref([])
+const searchScopes = INVENTORY_SEARCH_SCOPES
 const filterOptions = reactive({
   unitTypes: ['Villa', 'Chalet', 'Apartment', 'Duplex', 'Penthouse'],
   finishingTypes: [
@@ -448,10 +501,24 @@ const filters = reactive({
   finishingType: '',
   minPrice: '',
   maxPrice: '',
+  downPaymentBudget: '',
+  monthlyInstallmentBudget: '',
+  deliveryDate: '',
+  budgetCurrency: '',
 })
 
+let compoundRequest = 0
+let matchRequest = 0
+
+const activeCurrency = computed(() => filters.budgetCurrency || currency.value)
+const compoundLinkFilters = computed(() =>
+  compoundFilters(filters.destination, filters.developer),
+)
+
 const categoryHint = computed(() =>
-  localCategory.value === 'Resale'
+  localScope.value === 'Both'
+    ? __('Showing eligible Resale and Primary inventory. Each selected Unit keeps its actual category.')
+    : localScope.value === 'Resale'
     ? __('Showing seller-owned resale inventory only.')
     : __('Showing open developer inventory without a seller owner only.'),
 )
@@ -469,11 +536,15 @@ const matchCriteria = computed(() => {
     { label: __('Finishing'), value: profile.finishing_type },
     {
       label: __('Minimum Price'),
-      value: profile.budget_min ? formatPrice(profile.budget_min) : null,
+      value: profile.budget_min
+        ? formatPrice(profile.budget_min, profile.budget_currency)
+        : null,
     },
     {
       label: __('Maximum Budget'),
-      value: profile.budget ? formatPrice(profile.budget) : null,
+      value: profile.budget
+        ? formatPrice(profile.budget, profile.budget_currency)
+        : null,
     },
   ].filter((criterion) => criterion.value !== null && criterion.value !== '')
 })
@@ -502,9 +573,9 @@ function openUnit(unit) {
   window.open(href, '_blank', 'noopener')
 }
 
-function formatPrice(value) {
+function formatPrice(value, valueCurrency = activeCurrency.value) {
   if (value === null || value === undefined || value === '') return '—'
-  return Number(value).toLocaleString()
+  return formatCurrencyAmount(value, valueCurrency)
 }
 
 function displayFloor(value) {
@@ -519,6 +590,71 @@ function matchScoreClass(score) {
   return 'bg-surface-gray-2 text-ink-gray-7'
 }
 
+function unitComparisons(unit) {
+  const affordability = unit.affordability || {}
+  const comparison = (key, label, unknown = __('Comparison unavailable')) => {
+    const value = affordability[key] || unknown
+    return {
+      key,
+      label,
+      value,
+      className:
+        value === 'Within budget' || value === 'Within deadline'
+          ? 'bg-surface-green-1 text-ink-green-3'
+          : value === 'Over budget' || value === 'Later than requested'
+            ? 'bg-surface-amber-1 text-ink-amber-3'
+            : 'bg-surface-gray-2 text-ink-gray-7',
+    }
+  }
+  return [
+    comparison('total_budget', __('Total')),
+    comparison('down_payment', __('Upfront'), __('Unknown financing')),
+    comparison(
+      'monthly_installment',
+      __('Monthly'),
+      __('Unknown financing'),
+    ),
+    comparison('delivery', __('Delivery')),
+  ]
+}
+
+function selectedUnitRecords() {
+  return selectedUnits.value
+    .map((name) => selectedRecords.value.get(name))
+    .filter(Boolean)
+}
+
+function clearIncompatibleSelectedUnits() {
+  const criteria = {
+    preferredDestination: filters.destination,
+    preferredProject: filters.project,
+    preferredDeveloper: filters.developer,
+    inventorySearchScope: localScope.value,
+  }
+  const rejected = new Set(
+    selectedUnitRecords()
+      .filter((unit) => !selectedUnitIsCompatible(unit, criteria))
+      .map((unit) => unit.name),
+  )
+  if (!rejected.size) return
+  selectedUnits.value = selectedUnits.value.filter((name) => !rejected.has(name))
+  const retained = new Map()
+  selectedRecords.value.forEach((unit, name) => {
+    if (!rejected.has(name)) retained.set(name, unit)
+  })
+  selectedRecords.value = retained
+}
+
+function compoundValue(compound) {
+  return compound?.name || compound?.project_name || ''
+}
+
+function matchingCompound(project) {
+  return availableCompounds.value.find(
+    (compound) => compoundValue(compound) === project,
+  )
+}
+
 function clearFilterValues() {
   Object.assign(filters, {
     search: '',
@@ -529,6 +665,10 @@ function clearFilterValues() {
     finishingType: '',
     minPrice: '',
     maxPrice: '',
+    downPaymentBudget: '',
+    monthlyInstallmentBudget: '',
+    deliveryDate: '',
+    budgetCurrency: '',
   })
 }
 
@@ -540,30 +680,67 @@ function applyProfileToFilters(profile) {
   filters.finishingType = profile.finishing_type || ''
   filters.minPrice = profile.budget_min || ''
   filters.maxPrice = profile.budget || ''
+  filters.downPaymentBudget = profile.down_payment_budget ?? ''
+  filters.monthlyInstallmentBudget = profile.monthly_installment_budget ?? ''
+  filters.deliveryDate = profile.delivery_date || ''
+  filters.budgetCurrency = profile.budget_currency || currency.value || ''
 }
 
 function applyInitialCriteria() {
   const criteria = props.initialCriteria || {}
   filters.destination =
-    criteria.preferred_destination || criteria.destination || ''
-  filters.project = criteria.preferred_compound || criteria.project || ''
-  filters.developer = criteria.preferred_developer || criteria.developer || ''
-  filters.unitType = criteria.preferred_unit_type || criteria.unit_type || ''
+    criteria.requested_destination ||
+    criteria.preferred_destination ||
+    criteria.destination ||
+    ''
+  filters.project =
+    criteria.requested_project || criteria.preferred_compound || criteria.project || ''
+  filters.developer =
+    criteria.requested_developer ||
+    criteria.preferred_developer ||
+    criteria.developer ||
+    ''
+  filters.unitType =
+    criteria.requested_unit_type || criteria.preferred_unit_type || criteria.unit_type || ''
   filters.finishingType =
-    criteria.preferred_finishing_type || criteria.finishing_type || ''
+    criteria.requested_finishing_type ||
+    criteria.preferred_finishing_type ||
+    criteria.finishing_type ||
+    ''
   filters.minPrice = criteria.minimum_budget || criteria.min_price || ''
-  filters.maxPrice = criteria.buyer_budget || criteria.max_price || ''
+  filters.maxPrice =
+    criteria.requested_budget ?? criteria.buyer_budget ?? criteria.max_price ?? ''
+  filters.downPaymentBudget =
+    criteria.requested_down_payment_budget ?? criteria.down_payment_budget ?? ''
+  filters.monthlyInstallmentBudget =
+    criteria.requested_monthly_installment_budget ??
+    criteria.monthly_installment_budget ??
+    ''
+  filters.deliveryDate =
+    criteria.requested_delivery_date ||
+    criteria.preferred_delivery_date ||
+    criteria.delivery_date ||
+    ''
+  filters.budgetCurrency = criteria.budget_currency || ''
+  localScope.value = scopeForCategory(
+    props.interestCategory,
+    criteria.inventory_search_scope || props.inventorySearchScope,
+  )
 }
 
 async function fetchFilterOptions() {
   try {
     const result = await call(
       'real_estate_crm_customs.api.get_property_match_filter_options',
-      { interest_category: localCategory.value },
+      {
+        interest_category: localCategory.value,
+        inventory_search_scope: localScope.value,
+      },
     )
     if (result?.unit_types?.length) filterOptions.unitTypes = result.unit_types
     if (result?.finishing_types?.length)
       filterOptions.finishingTypes = result.finishing_types
+    if (result?.currency) currency.value = result.currency
   } catch {
     // Static schema options remain available if inventory-backed options fail.
   }
@@ -575,7 +752,79 @@ async function resetToLeadProfile() {
   await fetchUnits({ hydrateProfile: true })
 }
 
+async function loadCompounds() {
+  const request = ++compoundRequest
+  if (!filters.destination) {
+    availableCompounds.value = []
+    if (filters.project) filters.project = ''
+    clearIncompatibleSelectedUnits()
+    return
+  }
+  try {
+    const result = await call(
+      'real_estate_crm_customs.api.get_requirement_compounds',
+      {
+        destination: filters.destination,
+        developer: filters.developer || null,
+      },
+    )
+    if (request !== compoundRequest) return
+    availableCompounds.value = result?.compounds || []
+    const currentCompound = matchingCompound(filters.project)
+    if (
+      filters.project &&
+      (!currentCompound ||
+        !compoundIsCompatible(
+          currentCompound,
+          filters.destination,
+          filters.developer,
+        ))
+    ) {
+      filters.project = ''
+    }
+    // Auto-fill only after both parent requirements identify one eligible
+    // compound; developer always remains the compound's actual value.
+    if (
+      !filters.project &&
+      filters.destination &&
+      filters.developer &&
+      availableCompounds.value.length === 1
+    ) {
+      filters.project = compoundValue(availableCompounds.value[0])
+    }
+    clearIncompatibleSelectedUnits()
+  } catch {
+    if (request === compoundRequest) availableCompounds.value = []
+  }
+}
+
+async function resolveSelectedCompound(project) {
+  if (!project || !filters.destination) return
+  let compound = matchingCompound(project)
+  if (!compound) {
+    const request = ++compoundRequest
+    try {
+      const result = await call(
+        'real_estate_crm_customs.api.get_requirement_compounds',
+        { destination: filters.destination, developer: null },
+      )
+      if (request !== compoundRequest || filters.project !== project) return
+      availableCompounds.value = result?.compounds || []
+      compound = matchingCompound(project)
+    } catch {
+      return
+    }
+  }
+  if (!compound || !compoundIsCompatible(compound, filters.destination, '')) {
+    if (filters.project === project) filters.project = ''
+    return
+  }
+  // Link options can be stale; the compound response is authoritative.
+  filters.developer = compound.developer || ''
+}
+
 async function fetchUnits({ hydrateProfile = false } = {}) {
+  const request = ++matchRequest
   loading.value = true
   try {
     const result = await call(
@@ -584,6 +833,7 @@ async function fetchUnits({ hydrateProfile = false } = {}) {
         lead: props.leadId,
         interest: props.interestId || null,
         interest_category: localCategory.value,
+        inventory_search_scope: localScope.value,
         search: filters.search || null,
         destination: filters.destination || null,
         project: filters.project || null,
@@ -592,13 +842,21 @@ async function fetchUnits({ hydrateProfile = false } = {}) {
         finishing_type: filters.finishingType || null,
         min_price: filters.minPrice || null,
         max_price: filters.maxPrice || null,
+        down_payment_budget: filters.downPaymentBudget || null,
+        monthly_installment_budget: filters.monthlyInstallmentBudget || null,
+        delivery_date: filters.deliveryDate || null,
+        budget_currency: filters.budgetCurrency || currency.value || null,
         include_unit: props.includeUnit || null,
         strict_filters: strictFilters.value ? 1 : 0,
       },
     )
+    if (request !== matchRequest) return
     units.value = result?.units || []
-    matchProfile.value = result?.profile || {}
-    smartMatchActive.value = Boolean(result?.smart_match_active)
+    matchProfile.value = result?.profile_alias || result?.profile || {}
+    if (result?.currency) currency.value = result.currency
+    smartMatchActive.value = Boolean(
+      result?.criteria_exists ?? result?.smart_match_active,
+    )
     if (hydrateProfile) applyProfileToFilters(matchProfile.value)
     units.value.forEach((unit) => {
       if (selectedUnits.value.includes(unit.name))
@@ -612,6 +870,7 @@ async function fetchUnits({ hydrateProfile = false } = {}) {
       selectedUnits.value = [props.includeUnit]
     }
   } catch (error) {
+    if (request !== matchRequest) return
     units.value = []
     toast.error(
       error.messages?.[0] ||
@@ -619,7 +878,7 @@ async function fetchUnits({ hydrateProfile = false } = {}) {
         __('Could not load matching properties.'),
     )
   } finally {
-    loading.value = false
+    if (request === matchRequest) loading.value = false
   }
 }
 
@@ -630,21 +889,14 @@ async function submitSelection() {
     const selectedPropertyRecords = selectedUnits.value
       .map((name) => selectedRecords.value.get(name))
       .filter(Boolean)
-    if (props.linkOnSubmit) {
-      await call('real_estate_crm_customs.api.link_interested_units', {
-        lead: props.leadId,
-        units: JSON.stringify(selectedUnits.value),
-        interest_category: localCategory.value,
-      })
-      emit('units-added', selectedPropertyRecords)
-    } else {
-      emit(
-        'selected',
-        props.selectionMode === 'single'
-          ? selectedPropertyRecords[0]
-          : selectedPropertyRecords,
-      )
-    }
+    // Selection is a workflow draft only. The parent action bundle atomically
+    // creates/updates Interests; this picker must never directly link units.
+    emit(
+      'selected',
+      props.selectionMode === 'single'
+        ? selectedPropertyRecords[0]
+        : selectedPropertyRecords,
+    )
     selectionCommitted.value = true
     show.value = false
   } finally {
@@ -660,9 +912,38 @@ watch(
   () => props.interestCategory,
   (value) => {
     localCategory.value = value || 'Resale'
-    selectedUnits.value = []
-    selectedRecords.value = new Map()
+    localScope.value = scopeForCategory(value, props.inventorySearchScope)
+    clearIncompatibleSelectedUnits()
     if (show.value) initializePicker()
+  },
+)
+
+watch(
+  () => props.inventorySearchScope,
+  (value) => {
+    localScope.value = scopeForCategory(localCategory.value, value)
+  },
+)
+
+watch(localScope, () => {
+  clearIncompatibleSelectedUnits()
+  if (show.value) fetchUnits()
+})
+
+watch(
+  () => [filters.destination, filters.developer],
+  () => {
+    if (!show.value) return
+    loadCompounds()
+  },
+)
+
+watch(
+  () => filters.project,
+  async (project) => {
+    if (!show.value) return
+    await resolveSelectedCompound(project)
+    clearIncompatibleSelectedUnits()
   },
 )
 
@@ -675,6 +956,7 @@ async function initializePicker() {
   )
   if (hasInitialCriteria) {
     applyInitialCriteria()
+    await loadCompounds()
     await fetchUnits()
   } else {
     await fetchUnits({ hydrateProfile: true })

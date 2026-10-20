@@ -42,7 +42,7 @@
         </div>
 
         <div class="flex flex-wrap gap-2">
-          <template v-if="interest.current_action">
+          <template v-if="interest.is_active && interest.current_action">
             <Button
               :label="currentActionLabel(interest.current_action)"
               variant="solid"
@@ -54,7 +54,7 @@
               @click="$emit('cancel-action', interest.current_action)"
             />
           </template>
-          <template v-else>
+          <template v-else-if="interest.is_active">
             <Button
               v-for="action in interest.allowed_actions || []"
               :key="`${interest.name}-${action.action_type}-${action.purpose}`"
@@ -66,7 +66,7 @@
             />
           </template>
           <Button
-            v-if="interest.workflow_status === 'Requested'"
+            v-if="interest.workflow_status === 'Requested' && !interest.current_action"
             :label="__('Edit Requirements')"
             variant="subtle"
             @click="$emit('edit', interest)"
@@ -80,6 +80,7 @@
           <template
             v-if="
               canReview &&
+              interest.is_active &&
               interest.deletion_request_status === 'Pending Manager Approval'
             "
           >
@@ -115,7 +116,19 @@
         />
         <Fact
           :label="__('Requested Budget')"
-          :value="formatPrice(interest.requested_budget)"
+          :value="formatPrice(interest.requested_budget, interest.budget_currency)"
+        />
+        <Fact
+          :label="__('Down Payment Budget')"
+          :value="formatPrice(interest.requested_down_payment_budget, interest.budget_currency)"
+        />
+        <Fact
+          :label="__('Monthly Installment Budget / month')"
+          :value="formatPrice(interest.requested_monthly_installment_budget, interest.budget_currency)"
+        />
+        <Fact
+          :label="__('Delivery Deadline')"
+          :value="interest.requested_delivery_date"
         />
         <Fact :label="__('Compound')" :value="interest.requested_project" />
         <Fact :label="__('Developer')" :value="interest.requested_developer" />
@@ -123,6 +136,29 @@
           :label="__('Finishing')"
           :value="interest.requested_finishing_type"
         />
+      </div>
+
+      <p
+        v-if="interest.workflow_status === 'Closing'"
+        class="mt-4 rounded-lg bg-surface-amber-1 p-3 text-sm text-ink-amber-3"
+      >
+        {{ __('Contract signing is in progress. The Unit is reserved; this deal is not Closed Won yet.') }}
+      </p>
+      <div
+        v-if="interest.workflow_status === 'Closed Won'"
+        class="mt-4 rounded-lg bg-surface-green-1 p-3 text-sm text-ink-green-3"
+      >
+        <p class="font-semibold">{{ __('Signed deal — Closed Won') }}</p>
+        <p>{{ __('Contract Reference') }}: {{ interest.contract_reference }}</p>
+        <p>{{ __('Signed Date') }}: {{ interest.contract_signed_date }}</p>
+        <p class="text-xs">{{ __('Recorded by') }}: {{ interest.contract_recorded_by }} · {{ interest.closed_won_at }}</p>
+        <a
+          v-if="safeContractUrl(interest.signed_contract)"
+          :href="safeContractUrl(interest.signed_contract)"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="mt-2 inline-block font-medium underline"
+        >{{ __('Open signed contract') }}</a>
       </div>
 
       <div
@@ -166,6 +202,7 @@
 </template>
 
 <script setup>
+import { formatCurrencyAmount } from '@/utils/interestWorkflow'
 import { Button } from 'frappe-ui'
 import { defineComponent, h } from 'vue'
 
@@ -209,8 +246,9 @@ function currentActionLabel(action) {
 }
 
 function statusClass(status) {
-  if (['Shown - Interested', 'Fulfilled'].includes(status))
+  if (['Closed Won', 'Shown - Interested', 'Fulfilled'].includes(status))
     return 'bg-surface-green-1 text-ink-green-3'
+  if (status === 'Closing') return 'bg-surface-amber-1 text-ink-amber-3'
   if (['Offer Accepted', 'Negotiating', 'Showing Scheduled'].includes(status))
     return 'bg-surface-blue-1 text-ink-blue-3'
   if (['Offer Sent', 'Offer Viewed'].includes(status))
@@ -221,9 +259,11 @@ function statusClass(status) {
   return 'bg-surface-gray-2 text-ink-gray-7'
 }
 
-function formatPrice(value) {
-  if (value === null || value === undefined || value === '') return __('—')
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric.toLocaleString() : value
+function formatPrice(value, currency) {
+  return formatCurrencyAmount(value, currency)
+}
+
+function safeContractUrl(value) {
+  return typeof value === 'string' && (/^\/(?:private\/)?files\//.test(value) || /^https:\/\//.test(value)) ? value : null
 }
 </script>

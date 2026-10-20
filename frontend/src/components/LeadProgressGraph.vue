@@ -149,7 +149,8 @@ const stages = [
   'Requested',
   'Offer Sent',
   'Negotiating',
-  'Offer Selected',
+  'Closing',
+  'Closed Won',
 ]
 const idealPoints = computed(() => props.progress?.ideal || [])
 const actualPoints = computed(() => props.progress?.actual || [])
@@ -170,12 +171,12 @@ const idealPolyline = computed(() => linePoints(idealPoints.value))
 const actualPolyline = computed(() => linePoints(actualPoints.value))
 
 function stageIndex(status) {
-  const index = stages.indexOf(status)
+  const index = stages.indexOf(status === 'Offer Selected' ? 'Negotiating' : status)
   return index === -1 ? 0 : index
 }
 
 function stageY(index) {
-  return 200 - index * 34
+  return 200 - index * (180 / Math.max(1, stages.length - 1))
 }
 
 function timeX(hours) {

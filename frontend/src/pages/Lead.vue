@@ -164,7 +164,7 @@
                 </div>
               </div>
 
-              <!-- Card 4: Add Inventory Units or Requests -->
+              <!-- Card 4: Workflow-only inventory and request history -->
               <div
                 class="rounded border border-outline-gray-1 bg-surface-white p-4"
               >
@@ -178,22 +178,12 @@
                     <div class="text-xs text-ink-gray-6">
                       {{
                         __(
-                          'Select available inventory units, or record a buyer request when the requirement is not currently in inventory.',
+                          'Create interests only through the Action Web cycle. Existing requests remain available for managed editing.',
                         )
                       }}
                     </div>
                   </div>
                   <div class="flex flex-wrap gap-2">
-                    <Button
-                      :label="__('Add Interest')"
-                      variant="solid"
-                      @click="openInterestWorkflow"
-                    />
-                    <Button
-                      :label="__('Browse Units')"
-                      variant="subtle"
-                      @click="openInterestWorkflow"
-                    />
                     <Button
                       :label="__('Edit Existing')"
                       variant="subtle"
@@ -529,6 +519,7 @@
     :lead-id="leadId"
     :interest-id="interestUnitInterest"
     :interest-category="interestUnitCategory"
+    :inventory-search-scope="interestUnitScope"
     :include-unit="interestUnitCurrent"
     :initial-criteria="interestUnitCriteria"
     :selection-mode="interestUnitSelectionMode"
@@ -580,6 +571,15 @@ import {
 } from '@/utils'
 import { getView } from '@/utils/view'
 import { renderFieldLayoutDialog } from '@/utils/renderFieldLayoutDialog'
+import {
+  compoundFilters,
+  isPropertyRequirement,
+  isIsoCalendarDate,
+  isValidCurrencyAmount,
+  requirementDialogDependencies,
+  requestSnapshot,
+  scopeForCategory,
+} from '@/utils/interestWorkflow'
 import {
   isBuyerLead as isBuyerLeadRecord,
   isSellerLead as isSellerLeadRecord,
@@ -636,6 +636,7 @@ const interestUnitCategory = ref('Resale')
 const interestUnitInterest = ref('')
 const interestUnitCurrent = ref('')
 const interestUnitCriteria = ref({})
+const interestUnitScope = ref('Both')
 const interestUnitSelectionMode = ref('multiple')
 const interestUnitResolver = ref(null)
 
@@ -865,7 +866,7 @@ const buyerInterestPreferenceRows = computed(() => [
   { label: __('Developer'), value: doc.value.preferred_developer },
   { label: __('Compound'), value: doc.value.preferred_compound },
   { label: __('Finishing Type'), value: doc.value.preferred_finishing_type },
-  { label: __('Delivery Time'), value: doc.value.preferred_delivery_time },
+  { label: __('Delivery Date'), value: doc.value.preferred_delivery_date },
   { label: __('Budget'), value: formatPrice(doc.value.buyer_budget) },
   {
     label: __('Primary Buyer'),
@@ -1084,48 +1085,37 @@ async function handleUnifiedActionSubmitted(result, payload) {
   }
 }
 
-function openInterestWorkflow() {
-  if (!isBuyerLead.value) {
-    toast.error(__('Only Buyer leads can have interests.'))
-    return
-  }
-  const action = actionContext.data?.current_action
-  if (action?.action_type === 'Add Interest') {
-    openUnifiedAction(action)
-    return
-  }
-  if (action) {
-    toast.info(
-      __(
-        'Complete, reschedule, or cancel the current action before changing buyer interests.',
-      ),
-    )
-    return
-  }
-  const definition = (actionContext.data?.allowed_actions || []).find(
-    (item) => item.action_type === 'Add Interest',
-  )
-  if (!definition) {
-    toast.info(
-      __('An interest action is not available for this lead at the moment.'),
-    )
-    return
-  }
-  openUnifiedAction(definition)
-}
-
 // ---------------------------------------------------------------------------
-// 4. Interest Determination Dialog
+// 4. Interest Determination Dialog (editing only; creation is Action Web-only)
 // ---------------------------------------------------------------------------
 function selectInterestUnits(
   category,
   { interest = '', currentUnit = '', criteria = {}, multiple = true } = {},
 ) {
   if (interestUnitResolver.value) interestUnitResolver.value(null)
+  const snapshot = requestSnapshot(criteria)
   interestUnitCategory.value = category
   interestUnitInterest.value = interest || ''
   interestUnitCurrent.value = currentUnit || ''
-  interestUnitCriteria.value = criteria || {}
+  interestUnitCriteria.value = {
+    ...criteria,
+    buyer_budget: criteria.buyer_budget ?? snapshot.buyerBudget ?? '',
+    down_payment_budget:
+      criteria.down_payment_budget ?? snapshot.downPaymentBudget ?? '',
+    monthly_installment_budget:
+      criteria.monthly_installment_budget ??
+      snapshot.monthlyInstallmentBudget ??
+      '',
+    preferred_delivery_date:
+      criteria.preferred_delivery_date ?? snapshot.preferredDeliveryDate ?? '',
+    budget_currency: criteria.budget_currency ?? snapshot.budgetCurrency ?? '',
+    inventory_search_scope:
+      criteria.inventory_search_scope ?? snapshot.inventorySearchScope ?? '',
+  }
+  interestUnitScope.value = scopeForCategory(
+    category,
+    interestUnitCriteria.value.inventory_search_scope,
+  )
   interestUnitSelectionMode.value = multiple ? 'multiple' : 'single'
   showInterestUnitPicker.value = true
   return new Promise((resolve) => {
@@ -1153,13 +1143,15 @@ function openUnitRecord(unit) {
   })
 }
 
-function requestInterestFields(category, { editing = false } = {}) {
+function requestInterestFields(category, { editing = false, defaults = {} } = {}) {
+  const snapshot = requestSnapshot(defaults)
   const requestFields = [
     {
       fieldname: 'preferred_destination',
       fieldtype: 'Link',
       label: __('Preferred Destination'),
       options: 'Real Estate Destination',
+      reqd: isPropertyRequirement(category, defaults.international_type) ? 1 : 0,
     },
     {
       fieldname: 'preferred_unit_type',
@@ -1170,7 +1162,51 @@ function requestInterestFields(category, { editing = false } = {}) {
     {
       fieldname: 'buyer_budget',
       fieldtype: 'Currency',
-      label: __('Maximum Budget'),
+      label: __('Maximum Total Budget'),
+      reqd: 0,
+    },
+    {
+      fieldname: 'down_payment_budget',
+      fieldtype: 'Currency',
+      label: __('Maximum Down Payment Budget'),
+    },
+    {
+      fieldname: 'monthly_installment_budget',
+      fieldtype: 'Currency',
+      label: __('Maximum Monthly Installment Budget (per month)'),
+    },
+    {
+      fieldname: 'preferred_delivery_date',
+      fieldtype: 'Date',
+      label: __('Preferred Delivery Date'),
+    },
+    {
+      fieldname: 'inventory_search_scope',
+      fieldtype: 'Select',
+      label: __('Inventory Search Scope'),
+      options: '\nResale\nPrimary\nBoth',
+    },
+    {
+      fieldname: 'budget_currency',
+      fieldtype: 'Link',
+      label: __('Budget Currency'),
+      options: 'Currency',
+    },
+    {
+      fieldname: 'preferred_developer',
+      fieldtype: 'Link',
+      label: __('Preferred Developer'),
+      options: 'Property Developer',
+    },
+    {
+      fieldname: 'preferred_compound',
+      fieldtype: 'Link',
+      label: __('Preferred Compound'),
+      options: 'Real Estate Project',
+      link_filters: compoundFilters(
+        snapshot.preferredDestination,
+        snapshot.preferredDeveloper,
+      ),
     },
   ]
   if (category === 'Brokerage Request') {
@@ -1187,8 +1223,8 @@ function requestInterestFields(category, { editing = false } = {}) {
               fieldname: 'request_status',
               fieldtype: 'Select',
               label: __('Request Status'),
-              options: '\nOpen\nFulfilled\nCancelled',
-              reqd: 1,
+              options: '\nOpen',
+              read_only: 1,
             },
           ]
         : []),
@@ -1222,12 +1258,15 @@ function requestInterestFields(category, { editing = false } = {}) {
   ]
 }
 
-async function loadInterestRequirementOptions(category) {
+async function loadInterestRequirementOptions(category, inventorySearchScope = '') {
   try {
     return (
       (await call(
         'real_estate_crm_customs.api.get_property_match_filter_options',
-        { interest_category: category },
+        {
+          interest_category: category,
+          inventory_search_scope: inventorySearchScope || null,
+        },
       )) || {}
     )
   } catch {
@@ -1235,88 +1274,54 @@ async function loadInterestRequirementOptions(category) {
   }
 }
 
-async function collectInventoryInterestRequirements(category, defaults = {}) {
-  const options = await loadInterestRequirementOptions(category)
-  const finishingOptions = Array.from(
-    new Set(
-      [
-        defaults.preferred_finishing_type || doc.value.preferred_finishing_type,
-        ...(options.finishing_types?.length
-          ? options.finishing_types
-          : [
-              'Core & Shell',
-              'Semi-Finished',
-              'Fully Finished',
-              'Ultra Super Lux',
-            ]),
-      ].filter(Boolean),
-    ),
-  )
+function validateRequirementAmounts(values, category) {
+  for (const field of ['buyer_budget', 'down_payment_budget', 'monthly_installment_budget']) {
+    if (!isValidCurrencyAmount(values[field], { required: field === 'buyer_budget' && ['Resale', 'Primary'].includes(category) }))
+      throw new Error(__('Budget amounts must be zero or positive.'))
+  }
+  if (values.preferred_delivery_date && !isIsoCalendarDate(values.preferred_delivery_date))
+    throw new Error(__('Select a valid delivery date.'))
+  if ([values.buyer_budget, values.down_payment_budget, values.monthly_installment_budget].some((value) => value !== null && value !== undefined && value !== '') && !values.budget_currency)
+    throw new Error(__('Select Budget Currency or configure FCRM Settings currency.'))
+}
 
+async function collectInventoryInterestRequirements(category, defaults = {}) {
+  const snapshot = requestSnapshot(defaults)
+  const inventorySearchScope = scopeForCategory(category, snapshot.inventorySearchScope)
+  const options = await loadInterestRequirementOptions(category, inventorySearchScope)
+  const finishing = [...new Set([snapshot.preferredFinishing, ...(options.finishing_types || [])].filter(Boolean))]
   return renderFieldLayoutDialog({
-    title: __('Buyer Requirements — {0}', [category]),
+    title: __('Edit Requested Requirements — {0}', [category]),
     size: 'lg',
     defaults: {
-      preferred_destination:
-        defaults.preferred_destination || doc.value.preferred_destination,
-      preferred_unit_type:
-        defaults.preferred_unit_type || doc.value.preferred_unit_type,
-      preferred_developer:
-        defaults.preferred_developer || doc.value.preferred_developer,
-      preferred_compound:
-        defaults.preferred_compound || doc.value.preferred_compound,
-      preferred_finishing_type:
-        defaults.preferred_finishing_type || doc.value.preferred_finishing_type,
-      preferred_delivery_time:
-        defaults.preferred_delivery_time || doc.value.preferred_delivery_time,
-      buyer_budget: defaults.buyer_budget || doc.value.buyer_budget,
+      preferred_destination: snapshot.preferredDestination,
+      preferred_unit_type: snapshot.preferredUnitType,
+      preferred_developer: snapshot.preferredDeveloper,
+      preferred_compound: snapshot.preferredProject,
+      preferred_finishing_type: snapshot.preferredFinishing,
+      preferred_delivery_date: snapshot.preferredDeliveryDate,
+      buyer_budget: snapshot.buyerBudget,
+      down_payment_budget: snapshot.downPaymentBudget,
+      monthly_installment_budget: snapshot.monthlyInstallmentBudget,
+      inventory_search_scope: inventorySearchScope,
+      budget_currency: snapshot.budgetCurrency || options.currency || '',
     },
-    fields: [
-      {
-        fieldname: 'preferred_destination',
-        fieldtype: 'Link',
-        label: __('Preferred Destination'),
-        options: 'Real Estate Destination',
-        reqd: 1,
-      },
-      {
-        fieldname: 'preferred_unit_type',
-        fieldtype: 'Link',
-        label: __('Preferred Unit Type'),
-        options: 'Real Estate Unit Type',
-        reqd: 1,
-      },
-      {
-        fieldname: 'buyer_budget',
-        fieldtype: 'Currency',
-        label: __('Maximum Budget'),
-        reqd: 1,
-      },
-      {
-        fieldname: 'preferred_compound',
-        fieldtype: 'Link',
-        label: __('Preferred Compound'),
-        options: 'Real Estate Project',
-      },
-      {
-        fieldname: 'preferred_developer',
-        fieldtype: 'Link',
-        label: __('Preferred Developer'),
-        options: 'Property Developer',
-      },
-      {
-        fieldname: 'preferred_finishing_type',
-        fieldtype: 'Select',
-        label: __('Preferred Finishing'),
-        options: `\n${finishingOptions.join('\n')}`,
-      },
-      {
-        fieldname: 'preferred_delivery_time',
-        fieldtype: 'Data',
-        label: __('Preferred Delivery Time'),
-      },
+    fields: (values) => [
+      { fieldname: 'preferred_destination', fieldtype: 'Link', label: __('Preferred Destination'), options: 'Real Estate Destination', reqd: 1 },
+      { fieldname: 'preferred_unit_type', fieldtype: 'Link', label: __('Preferred Unit Type'), options: 'Real Estate Unit Type', reqd: 1 },
+      { fieldname: 'buyer_budget', fieldtype: 'Currency', label: __('Maximum Total Budget'), options: 'budget_currency', reqd: 1 },
+      { fieldname: 'down_payment_budget', fieldtype: 'Currency', label: __('Maximum Down Payment Budget'), options: 'budget_currency' },
+      { fieldname: 'monthly_installment_budget', fieldtype: 'Currency', label: __('Maximum Monthly Installment Budget (per month)'), options: 'budget_currency' },
+      { fieldname: 'budget_currency', fieldtype: 'Link', label: __('Budget Currency'), options: 'Currency', reqd: 1 },
+      { fieldname: 'inventory_search_scope', fieldtype: 'Select', label: __('Inventory Search Scope'), options: '\nResale\nPrimary\nBoth' },
+      { fieldname: 'preferred_delivery_date', fieldtype: 'Date', label: __('Preferred Delivery Date') },
+      { fieldname: 'preferred_developer', fieldtype: 'Link', label: __('Preferred Developer'), options: 'Property Developer' },
+      { fieldname: 'preferred_compound', fieldtype: 'Link', label: __('Preferred Compound'), options: 'Real Estate Project', link_filters: compoundFilters(values.preferred_destination, values.preferred_developer) },
+      { fieldname: 'preferred_finishing_type', fieldtype: 'Select', label: __('Preferred Finishing'), options: `\n${finishing.join('\n')}` },
     ],
-    submitLabel: __('Find Matching Units'),
+    onChange: requirementDialogDependencies(call),
+    onSubmit: (values) => validateRequirementAmounts(values, category),
+    submitLabel: __('Save Requirements'),
   })
 }
 
@@ -1332,8 +1337,10 @@ async function collectRequestInterest(
         : __('Brokerage Request'),
     size: 'lg',
     defaults,
-    fields: requestInterestFields(category, { editing }),
-    submitLabel: __('Save Interest'),
+    fields: (values) => requestInterestFields(category, { editing, defaults: values }),
+    onChange: requirementDialogDependencies(call),
+    onSubmit: (values) => validateRequirementAmounts(values, category),
+    submitLabel: __('Save Requirements'),
   })
 }
 
@@ -1370,10 +1377,20 @@ async function openExistingInterestEditor() {
 async function editInterestRecord(row) {
   const category = row.interest_category
   if (!category) return false
+  if (
+    row.workflow_status !== 'Requested' ||
+    row.deletion_request_status === 'Pending Manager Approval'
+  ) {
+    toast.info(
+      __('Only unlocked Requested interests can be edited. Workflow changes remain available through Action Web.'),
+    )
+    return false
+  }
 
   let values = {
     interest_category: category,
   }
+  const snapshot = requestSnapshot(row)
   if (['Resale', 'Primary'].includes(category)) {
     const requirements = await collectInventoryInterestRequirements(category, {
       preferred_destination: row.requested_destination,
@@ -1382,12 +1399,15 @@ async function editInterestRecord(row) {
       preferred_developer: row.requested_developer,
       preferred_compound: row.requested_project,
       preferred_finishing_type: row.requested_finishing_type,
-      preferred_delivery_time: row.requested_delivery_time,
       buyer_budget: row.requested_budget,
+      down_payment_budget: row.requested_down_payment_budget,
+      monthly_installment_budget: row.requested_monthly_installment_budget,
+      preferred_delivery_date: row.requested_delivery_date,
+      inventory_search_scope: row.inventory_search_scope,
+      budget_currency: row.budget_currency,
     })
     if (!requirements) return false
     const isRequested =
-      row.workflow_status === 'Requested' &&
       row.record_type !== 'Inventory Unit' &&
       row.interest_record_type !== 'Inventory Unit'
     if (isRequested) {
@@ -1412,11 +1432,21 @@ async function editInterestRecord(row) {
         international_type: row.international_type,
         international_country: row.international_country,
         international_details: row.international_details,
-        preferred_destination:
-          row.requested_destination || doc.value.preferred_destination,
-        preferred_area: doc.value.preferred_area,
-        preferred_unit_type: doc.value.preferred_unit_type,
-        buyer_budget: doc.value.buyer_budget,
+        preferred_destination: snapshot.preferredDestination,
+        preferred_area: row.requested_area || '',
+        preferred_unit_type: snapshot.preferredUnitType,
+        preferred_developer: snapshot.preferredDeveloper,
+        preferred_compound: snapshot.preferredProject,
+        preferred_finishing_type: snapshot.preferredFinishing,
+        preferred_delivery_date: snapshot.preferredDeliveryDate,
+        buyer_budget: snapshot.buyerBudget,
+        down_payment_budget: snapshot.downPaymentBudget,
+        monthly_installment_budget: snapshot.monthlyInstallmentBudget,
+        inventory_search_scope: scopeForCategory(
+          category,
+          snapshot.inventorySearchScope,
+        ),
+        budget_currency: snapshot.budgetCurrency,
       },
       { editing: true },
     )
@@ -1572,10 +1602,12 @@ async function editBuyerInterestPreferences() {
       preferred_developer: doc.value.preferred_developer,
       preferred_compound: doc.value.preferred_compound,
       preferred_finishing_type: doc.value.preferred_finishing_type,
-      preferred_delivery_time: doc.value.preferred_delivery_time,
+      preferred_delivery_date: doc.value.preferred_delivery_date,
+      budget_currency: doc.value.budget_currency,
+      inventory_search_scope: doc.value.inventory_search_scope || 'Both',
       buyer_budget: doc.value.buyer_budget,
     },
-    fields: [
+    fields: (current) => [
       {
         fieldname: 'preferred_destination',
         fieldtype: 'Link',
@@ -1599,6 +1631,7 @@ async function editBuyerInterestPreferences() {
         fieldtype: 'Link',
         label: __('Preferred Compound'),
         options: 'Real Estate Project',
+        link_filters: compoundFilters(current.preferred_destination, current.preferred_developer),
       },
       {
         fieldname: 'preferred_finishing_type',
@@ -1607,12 +1640,16 @@ async function editBuyerInterestPreferences() {
         options: '\nCore & Shell\nSemi-Finished\nFully Finished',
       },
       {
-        fieldname: 'preferred_delivery_time',
-        fieldtype: 'Data',
-        label: __('Delivery Time'),
+        fieldname: 'preferred_delivery_date',
+        fieldtype: 'Date',
+        label: __('Delivery Date'),
       },
-      { fieldname: 'buyer_budget', fieldtype: 'Currency', label: __('Budget') },
+      { fieldname: 'buyer_budget', fieldtype: 'Currency', label: __('Budget'), options: 'budget_currency' },
+      { fieldname: 'budget_currency', fieldtype: 'Link', label: __('Budget Currency'), options: 'Currency' },
+      { fieldname: 'inventory_search_scope', fieldtype: 'Select', label: __('Inventory Search Scope'), options: '\nResale\nPrimary\nBoth' },
     ],
+    onChange: requirementDialogDependencies(call),
+    onSubmit: (current) => validateRequirementAmounts(current, ''),
     submitLabel: __('Save Interest Details'),
   })
 
