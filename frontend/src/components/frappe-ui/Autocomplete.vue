@@ -14,6 +14,7 @@
         >
           <div class="w-full">
             <button
+              type="button"
               class="relative flex h-7 w-full items-center justify-between gap-2 rounded px-2 py-1 transition-colors pr-7"
               :class="inputClasses"
               @click="() => !disabled && togglePopover()"
@@ -63,6 +64,7 @@
                 "
               />
               <button
+                type="button"
                 class="absolute right-1.5 inline-flex h-7 w-7 items-center justify-center"
                 @click="selectedValue = null"
               >
