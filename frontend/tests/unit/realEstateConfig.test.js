@@ -3,7 +3,9 @@ import {
   REAL_ESTATE_ENTITIES,
   REAL_ESTATE_LIST_ROUTE_NAMES,
   newRealEstateDocument,
+  realEstateDependentLinkFilters,
   realEstateEntityByDoctype,
+  realEstateImportDoctypeMap,
 } from '@/utils/realEstate'
 import { describe, expect, it } from 'vitest'
 
@@ -14,6 +16,7 @@ describe('real-estate entity configuration', () => {
     'Property Developer',
     'Real Estate Destination',
     'Real Estate Unit Type',
+    'Real Estate Unit Category',
     'Real Estate Amenity',
   ]
 
@@ -52,5 +55,56 @@ describe('real-estate entity configuration', () => {
     expect(second.doctype).toBe('Real Estate Unit')
     expect(second.__newDocument).toBe(true)
     expect(second.inventory_type).toBe('Primary')
+  })
+
+  it('starts a new Compound as a Compound without inventing a status', () => {
+    const entity = realEstateEntityByDoctype('Real Estate Project')
+    const doc = newRealEstateDocument(entity)
+    expect(doc.record_type).toBe('Compound')
+    expect(doc.status).toBeUndefined()
+  })
+
+  it('filters Unit Types by the selected Unit Category', () => {
+    const none = realEstateDependentLinkFilters('Real Estate Unit', {})
+    expect(JSON.parse(none.physical_unit_type.link_filters)).toEqual({
+      is_active: 1,
+    })
+    const residential = realEstateDependentLinkFilters('Real Estate Unit', {
+      unit_category: 'Residential',
+    })
+    expect(JSON.parse(residential.physical_unit_type.link_filters)).toEqual({
+      is_active: 1,
+      unit_category: 'Residential',
+    })
+  })
+
+  it('limits Parent Compound to Compounds other than the record itself', () => {
+    const fresh = realEstateDependentLinkFilters('Real Estate Project', {
+      __newDocument: true,
+    })
+    expect(JSON.parse(fresh.parent_compound.link_filters)).toEqual({
+      record_type: 'Compound',
+    })
+    const saved = realEstateDependentLinkFilters('Real Estate Project', {
+      name: 'Hyde Park',
+    })
+    expect(JSON.parse(saved.parent_compound.link_filters)).toEqual({
+      record_type: 'Compound',
+      name: ['!=', 'Hyde Park'],
+    })
+    expect(realEstateDependentLinkFilters('Real Estate Amenity', {})).toEqual({})
+  })
+
+  it('maps every master to an import title, list route and record route', () => {
+    const map = realEstateImportDoctypeMap('/crm')
+    expect(Object.keys(map)).toEqual(expectedDoctypes)
+    expect(map['Real Estate Project']).toEqual({
+      title: 'Compounds',
+      listRoute: '/crm/real-estate-projects',
+      pageRoute: '/crm/real-estate-projects/docname',
+    })
+    expect(map['Real Estate Unit Category'].pageRoute).toBe(
+      '/crm/real-estate-unit-categories/docname',
+    )
   })
 })

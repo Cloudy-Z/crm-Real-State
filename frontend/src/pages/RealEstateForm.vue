@@ -83,6 +83,48 @@
         </div>
         <ErrorMessage v-if="formError" class="mt-4" :message="__(formError)" />
       </section>
+
+      <section
+        v-if="showPhasesPanel"
+        class="rounded-xl border bg-surface-white p-4 shadow-sm sm:p-6"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold text-ink-gray-9">
+            {{ __('Phases') }}
+            <span class="ml-1 text-sm font-normal text-ink-gray-5">
+              ({{ phases.data?.length || 0 }})
+            </span>
+          </h2>
+          <Button
+            v-if="doctypePermissions.data?.create"
+            :label="__('Add Phase')"
+            variant="subtle"
+            icon-left="plus"
+            @click="addPhase"
+          />
+        </div>
+        <p
+          v-if="!phases.data?.length"
+          class="mt-3 text-sm text-ink-gray-5"
+        >
+          {{ __('This Compound has no Phases yet.') }}
+        </p>
+        <ul v-else class="mt-3 divide-y rounded-lg border">
+          <li
+            v-for="phase in phases.data"
+            :key="phase.name"
+            class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-surface-gray-1"
+            @click="openPhase(phase.name)"
+          >
+            <span class="truncate text-ink-gray-9">
+              {{ phase.project_name || phase.name }}
+            </span>
+            <span class="shrink-0 text-ink-gray-5">
+              {{ phase.status || __('No status') }}
+            </span>
+          </li>
+        </ul>
+      </section>
     </div>
   </div>
 
@@ -119,9 +161,10 @@ import { useDocument } from '@/data/document'
 import { usersStore } from '@/stores/users'
 import {
   newRealEstateDocument,
+  realEstateDependentLinkFilters,
   realEstateEntityByDoctype,
 } from '@/utils/realEstate'
-import { Breadcrumbs, createResource, toast, usePageMeta } from 'frappe-ui'
+import { Breadcrumbs, call, createResource, toast, usePageMeta } from 'frappe-ui'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -253,6 +296,95 @@ const create = createResource({
   },
 })
 
+/**
+ * Apply link filters that depend on other fields of this record
+ * (Unit Type by Unit Category, Parent Compound limited to Compounds).
+ * Existing script overrides for the same field are preserved.
+ */
+function applyDependentLinkFilters() {
+  const dependent = realEstateDependentLinkFilters(doctype, document.doc)
+  if (!Object.keys(dependent).length) return
+  if (!document.fieldPropertyOverrides) document.fieldPropertyOverrides = {}
+  for (const [fieldname, value] of Object.entries(dependent)) {
+    const current = document.fieldPropertyOverrides[fieldname] || {}
+    if (current.link_filters === value.link_filters) continue
+    document.fieldPropertyOverrides[fieldname] = { ...current, ...value }
+  }
+}
+
+watch(
+  () => [
+    document.doc?.name,
+    document.doc?.unit_category,
+    document.doc?.record_type,
+  ],
+  applyDependentLinkFilters,
+  { immediate: true },
+)
+
+// A Unit Type from another category is cleared when the category changes,
+// so the saved category always matches the Unit Type (the server enforces it).
+watch(
+  () => document.doc?.unit_category,
+  async (category, previous) => {
+    if (doctype !== 'Real Estate Unit') return
+    if (!category || category === previous) return
+    const unitType = document.doc?.physical_unit_type
+    if (!unitType) return
+    try {
+      const row = await call('frappe.client.get_value', {
+        doctype: 'Real Estate Unit Type',
+        filters: unitType,
+        fieldname: 'unit_category',
+      })
+      if (
+        row?.unit_category &&
+        row.unit_category !== category &&
+        document.doc?.physical_unit_type === unitType &&
+        document.doc?.unit_category === category
+      ) {
+        document.doc.physical_unit_type = null
+      }
+    } catch {
+      // Lookup failures are harmless; the server keeps category and type consistent.
+    }
+  },
+)
+
+const showPhasesPanel = computed(
+  () =>
+    doctype === 'Real Estate Project' &&
+    !isNew.value &&
+    Boolean(doc.value?.name) &&
+    doc.value?.record_type !== 'Phase',
+)
+
+const phases = createResource({
+  url: 'frappe.client.get_list',
+  makeParams() {
+    return {
+      doctype: 'Real Estate Project',
+      filters: { parent_compound: props.recordId },
+      fields: ['name', 'project_name', 'status'],
+      order_by: 'project_name asc',
+      limit_page_length: 0,
+    }
+  },
+  auto: doctype === 'Real Estate Project' && !isNew.value,
+})
+
+function openPhase(name) {
+  router.push({ name: config.formRouteName, params: { recordId: name } })
+}
+
+function addPhase() {
+  router.push({
+    name: config.formRouteName,
+    params: { recordId: 'new' },
+    query: { parent_compound: props.recordId },
+  })
+}
+
 function formatSummaryValue(value) {
   if (value === null || value === undefined || value === '') return __('—')
   if (value === 1 || value === true) return __('Yes')
@@ -319,7 +451,12 @@ onMounted(async () => {
   if (isNew.value) {
     document.doc = newRealEstateDocument(config)
     document.fieldPropertyOverrides = {}
+    if (doctype === 'Real Estate Project' && route.query.parent_compound) {
+      document.doc.record_type = 'Phase'
+      document.doc.parent_compound = String(route.query.parent_compound)
+    }
   }
+  applyDependentLinkFilters()
   await triggerOnRender?.()
 })
 

@@ -7,6 +7,7 @@
 </template>
 
 <script setup>
+import { realEstateImportDoctypeMap } from '@/utils/realEstate'
 import { usePageMeta } from 'frappe-ui'
 import { DataImport } from 'frappe-ui/frappe'
 import { useRoute } from 'vue-router'
@@ -42,6 +43,9 @@ const doctypeMap = {
     title: 'Call Log',
     listRoute: '/crm/call-logs',
   },
+  // Every real-estate master (Units, Compounds, Developers, Destinations,
+  // Unit Categories, Unit Types, Amenities) is importable from the portal.
+  ...realEstateImportDoctypeMap('/crm'),
 }
 
 usePageMeta(() => {

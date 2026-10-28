@@ -28,6 +28,7 @@ export const REAL_ESTATE_ENTITIES = Object.freeze([
       'project',
       'destination',
       'inventory_type',
+      'unit_category',
       'physical_unit_type',
       'status',
       'total_gross',
@@ -36,9 +37,11 @@ export const REAL_ESTATE_ENTITIES = Object.freeze([
     summaryFields: [
       'sku',
       'project',
+      'master_compound',
       'destination',
       'developer',
       'inventory_type',
+      'unit_category',
       'physical_unit_type',
       'status',
       'delivery_status',
@@ -47,10 +50,12 @@ export const REAL_ESTATE_ENTITIES = Object.freeze([
     ],
     fieldLabels: {
       sku: 'SKU',
-      project: 'Compound',
+      project: 'Compound / Phase',
+      master_compound: 'Master Compound',
       destination: 'Destination',
       developer: 'Developer',
       inventory_type: 'Inventory Type',
+      unit_category: 'Unit Category',
       physical_unit_type: 'Unit Type',
       status: 'Availability',
       delivery_status: 'Delivery Status',
@@ -71,9 +76,11 @@ export const REAL_ESTATE_ENTITIES = Object.freeze([
     defaultViewName: 'Real Estate Projects View',
     primaryField: 'project_name',
     icon: 'building-2',
-    defaults: { status: 'Planning', compound_area_unit: 'Sq M' },
-    secondaryFields: ['destination', 'developer', 'status'],
+    defaults: { record_type: 'Compound', compound_area_unit: 'Sq M' },
+    secondaryFields: ['record_type', 'parent_compound', 'destination', 'developer'],
     summaryFields: [
+      'record_type',
+      'parent_compound',
       'developer',
       'destination',
       'status',
@@ -81,6 +88,8 @@ export const REAL_ESTATE_ENTITIES = Object.freeze([
       'compound_area_unit',
     ],
     fieldLabels: {
+      record_type: 'Record Type',
+      parent_compound: 'Parent Compound',
       developer: 'Developer',
       destination: 'Destination',
       status: 'Status',
@@ -140,6 +149,27 @@ export const REAL_ESTATE_ENTITIES = Object.freeze([
     primaryField: 'unit_type_name',
     icon: 'shapes',
     defaults: { is_active: 1 },
+    secondaryFields: ['unit_category', 'abbreviation', 'is_active'],
+    summaryFields: ['unit_category', 'abbreviation', 'is_active'],
+    fieldLabels: {
+      unit_category: 'Unit Category',
+      abbreviation: 'Abbreviation',
+      is_active: 'Active',
+    },
+  },
+  {
+    doctype: 'Real Estate Unit Category',
+    listRouteName: 'Real Estate Unit Categories',
+    formRouteName: 'Real Estate Unit Category',
+    listPath: '/real-estate-unit-categories/view/:viewType?',
+    listAlias: '/real-estate-unit-categories',
+    formPath: '/real-estate-unit-categories/:recordId',
+    label: 'Unit Categories',
+    entityLabel: 'Unit Category',
+    defaultViewName: 'Real Estate Unit Categories View',
+    primaryField: 'category_name',
+    icon: 'layers',
+    defaults: { is_active: 1 },
     secondaryFields: ['abbreviation', 'is_active'],
     summaryFields: ['abbreviation', 'is_active'],
     fieldLabels: {
@@ -198,4 +228,49 @@ export function newRealEstateDocument(entity) {
     doctype: entity.doctype,
     ...(entity.defaults || {}),
   }
+}
+
+/**
+ * Link filters that depend on another field of the same record.
+ * The CRM portal only understands static JSON link_filters, so these rules
+ * are applied by RealEstateForm as per-field property overrides.
+ */
+export const REAL_ESTATE_DEPENDENT_LINK_FILTERS = Object.freeze({
+  'Real Estate Unit': {
+    physical_unit_type: (doc) => ({
+      is_active: 1,
+      ...(doc?.unit_category ? { unit_category: doc.unit_category } : {}),
+    }),
+    unit_category: () => ({ is_active: 1 }),
+  },
+  'Real Estate Project': {
+    parent_compound: (doc) => ({
+      record_type: 'Compound',
+      ...(doc?.name && !doc?.__newDocument ? { name: ['!=', doc.name] } : {}),
+    }),
+  },
+})
+
+export function realEstateDependentLinkFilters(doctype, doc) {
+  const rules = REAL_ESTATE_DEPENDENT_LINK_FILTERS[doctype] || {}
+  return Object.fromEntries(
+    Object.entries(rules).map(([fieldname, rule]) => [
+      fieldname,
+      { link_filters: JSON.stringify(rule(doc || {})) },
+    ]),
+  )
+}
+
+/** Data Import page map: title, list route and record route for every master. */
+export function realEstateImportDoctypeMap(base = '/crm') {
+  return Object.fromEntries(
+    REAL_ESTATE_ENTITIES.map((entity) => [
+      entity.doctype,
+      {
+        title: entity.label,
+        listRoute: `${base}${entity.listAlias}`,
+        pageRoute: `${base}${entity.formPath.replace(':recordId', 'docname')}`,
+      },
+    ]),
+  )
 }
