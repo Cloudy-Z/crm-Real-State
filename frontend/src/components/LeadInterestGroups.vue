@@ -146,9 +146,9 @@ const groups = computed(() =>
 
 function categoryDescription(category) {
   return {
-    Resale: __('Seller-owned units from resale inventory.'),
+    Resale: __('Owner-listed units from resale inventory, for sale or rent.'),
     Primary: __(
-      'Available developer inventory, excluding seller-owned resale units.',
+      'Available developer inventory, excluding owner-listed resale units.',
     ),
     'Brokerage Request': __(
       'Requirements that are not currently matched to inventory.',

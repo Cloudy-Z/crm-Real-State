@@ -13,6 +13,14 @@
           @click="showLayoutEditor = true"
         />
         <Button
+          v-if="canReleaseLease"
+          :label="__('Return to Market')"
+          variant="subtle"
+          icon-left="rotate-ccw"
+          :loading="releasingLease"
+          @click="releaseLease"
+        />
+        <Button
           v-if="!isNew && canDelete"
           :label="__('Delete')"
           variant="subtle"
@@ -212,6 +220,31 @@ const canDelete = computed(
   () => permissions.data?.permissions?.delete || false,
 )
 const saving = computed(() => document.save?.loading || create.loading)
+// A Rented Unit returns to the market only through this manager action.
+const releasingLease = ref(false)
+const canReleaseLease = computed(
+  () =>
+    doctype === 'Real Estate Unit' &&
+    !isNew.value &&
+    doc.value?.status === 'Rented' &&
+    isManager(),
+)
+async function releaseLease() {
+  if (releasingLease.value) return
+  if (!window.confirm(__('The lease has ended and this Unit is available again?'))) return
+  releasingLease.value = true
+  try {
+    await call('real_estate_crm_customs.api.release_rented_unit', {
+      unit: doc.value.name,
+    })
+    await document.reload()
+    toast.success(__('Unit returned to the market as Available.'))
+  } catch (err) {
+    toast.error(err.messages?.[0] || err.message || __('Could not return the Unit to the market.'))
+  } finally {
+    releasingLease.value = false
+  }
+}
 const title = computed(() => {
   if (isNew.value) return __('New {0}', [config.entityLabel])
   return doc.value?.[config.primaryField] || doc.value?.name || props.recordId

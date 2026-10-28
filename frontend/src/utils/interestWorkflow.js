@@ -73,9 +73,45 @@ export function isPropertyRequirement(category, internationalType = '') {
   )
 }
 
-export function scopeForCategory(category, currentScope = '') {
+export const DEAL_BUY = 'Buy'
+export const DEAL_RENT = 'Rent'
+export const DEAL_TYPES = Object.freeze([DEAL_BUY, DEAL_RENT])
+// Interest categories where a buyer may ask to rent instead of buy.
+export const RENT_CATEGORIES = Object.freeze(['Resale', 'Brokerage Request'])
+
+export function scopeForCategory(category, currentScope = '', dealType = '') {
+  // Renting exists only for Owner-listed Resale Units.
+  if (dealType === DEAL_RENT) return 'Resale'
   if (INVENTORY_SEARCH_SCOPES.includes(currentScope)) return currentScope
   return category === 'Primary' ? 'Primary' : 'Resale'
+}
+
+export function canRentCategory(category) {
+  return RENT_CATEGORIES.includes(category)
+}
+
+export function normalizeDealType(value, category = '') {
+  const deal = value === DEAL_RENT ? DEAL_RENT : DEAL_BUY
+  if (deal === DEAL_RENT && category && !canRentCategory(category)) {
+    return DEAL_BUY
+  }
+  return deal
+}
+
+export function isRentDeal(draft = {}) {
+  return normalizeDealType(draft.dealType, draft.interestCategory) === DEAL_RENT
+}
+
+/**
+ * Unit Types allowed for a Unit Category. ``typeCategories`` maps
+ * Unit Type -> Unit Category. Types with no category stay selectable.
+ */
+export function unitTypesForCategory(unitTypes = [], typeCategories = {}, category = '') {
+  if (!category) return [...unitTypes]
+  return unitTypes.filter((name) => {
+    const owner = typeCategories?.[name]
+    return !owner || owner === category
+  })
 }
 
 export function requestSnapshot(source = {}, lead = {}) {
@@ -96,10 +132,26 @@ export function requestSnapshot(source = {}, lead = {}) {
       [source.requested_destination, source.preferred_destination, source.destination],
       [lead.preferred_destination],
     ) || '',
+    dealType:
+      fallback([source.deal_type], [lead.deal_type]) === DEAL_RENT
+        ? DEAL_RENT
+        : DEAL_BUY,
+    preferredUnitCategory: fallback(
+      [
+        source.requested_unit_category,
+        source.preferred_unit_category,
+        source.unit_category,
+      ],
+      [lead.preferred_unit_category],
+    ) || '',
     preferredUnitType: fallback(
       [source.requested_unit_type, source.preferred_unit_type, source.unit_type],
       [lead.preferred_unit_type],
     ) || '',
+    rentBudget: fallback(
+      [source.requested_rent_budget, source.rent_budget],
+      [lead.requested_rent_budget],
+    ),
     buyerBudget: fallback(
       [source.requested_budget, source.buyer_budget, source.budget],
       [lead.buyer_budget],
@@ -199,18 +251,27 @@ export function isPersistedInterestSnapshot(source = {}) {
 }
 
 export function buildInterestCriteriaPayload(draft) {
+  const dealType = normalizeDealType(draft.dealType, draft.interestCategory)
+  const renting = dealType === DEAL_RENT
   return {
+    deal_type: dealType,
     preferred_destination: draft.preferredDestination || null,
+    preferred_unit_category: draft.preferredUnitCategory || null,
     preferred_unit_type: draft.preferredUnitType || null,
-    buyer_budget: normalizeCurrencyAmount(draft.buyerBudget),
-    down_payment_budget: normalizeCurrencyAmount(draft.downPaymentBudget),
-    monthly_installment_budget: normalizeCurrencyAmount(
-      draft.monthlyInstallmentBudget,
-    ),
+    // A Rent request is budgeted by monthly rent; purchase budgets do not apply.
+    buyer_budget: renting ? null : normalizeCurrencyAmount(draft.buyerBudget),
+    down_payment_budget: renting
+      ? null
+      : normalizeCurrencyAmount(draft.downPaymentBudget),
+    monthly_installment_budget: renting
+      ? null
+      : normalizeCurrencyAmount(draft.monthlyInstallmentBudget),
+    rent_budget: renting ? normalizeCurrencyAmount(draft.rentBudget) : null,
     preferred_delivery_date: draft.preferredDeliveryDate || null,
     inventory_search_scope: scopeForCategory(
       draft.interestCategory,
       draft.inventorySearchScope,
+      dealType,
     ),
     budget_currency: draft.budgetCurrency || null,
     preferred_compound: draft.preferredProject || null,
@@ -248,7 +309,7 @@ export function canBeginClosing(status) {
   return CLOSING_ELIGIBLE_STATUSES.includes(status)
 }
 
-export function unitSellerOwner(row = {}) {
+export function unitOwnerLead(row = {}) {
   return row.owner_lead || row.unit_owner_lead || row.seller_owner || ''
 }
 
@@ -260,12 +321,12 @@ export function unitDeveloper(row = {}) {
 
 export function counterpartyMeetingPurpose(row = {}, status = '') {
   if (!COUNTERPARTY_MEETING_STATUSES.includes(status) || !row.unit) return ''
-  if (row.interest_category === 'Resale' && unitSellerOwner(row))
+  if (row.interest_category === 'Resale' && unitOwnerLead(row))
     return 'Owner Meeting'
   if (
     row.interest_category === 'Primary' &&
     unitDeveloper(row) &&
-    !unitSellerOwner(row)
+    !unitOwnerLead(row)
   )
     return 'Developer Meeting'
   return ''

@@ -92,10 +92,43 @@
               {{ __('Inventory Search Scope') }}
               <select
                 v-model="localScope"
-                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+                :disabled="isRent"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none disabled:bg-surface-gray-2"
               >
                 <option v-for="scope in searchScopes" :key="scope" :value="scope">
                   {{ __(scope) }}
+                </option>
+              </select>
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
+              {{ __('Deal Type') }}
+              <select
+                v-model="filters.dealType"
+                :disabled="!canRent"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none disabled:bg-surface-gray-2"
+              >
+                <option v-for="deal in dealTypes" :key="deal" :value="deal">
+                  {{ __(deal) }}
+                </option>
+              </select>
+            </label>
+            <label
+              class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
+            >
+              {{ __('Unit Category') }}
+              <select
+                v-model="filters.unitCategory"
+                class="h-9 rounded border border-outline-gray-2 bg-surface-white px-3 text-sm text-ink-gray-8 focus:border-outline-gray-4 focus:outline-none"
+              >
+                <option value="">{{ __('All Categories') }}</option>
+                <option
+                  v-for="category in filterOptions.unitCategories"
+                  :key="category"
+                  :value="category"
+                >
+                  {{ __(category) }}
                 </option>
               </select>
             </label>
@@ -109,7 +142,7 @@
               >
                 <option value="">{{ __('All Types') }}</option>
                 <option
-                  v-for="type in filterOptions.unitTypes"
+                  v-for="type in unitTypeChoices"
                   :key="type"
                   :value="type"
                 >
@@ -149,29 +182,38 @@
               </select>
             </label>
             <CurrencyBudgetInput
-              v-model="filters.minPrice"
-              :label="__('Minimum Total Price')"
+              v-if="isRent"
+              v-model="filters.rentBudget"
+              :label="__('Maximum Monthly Rent')"
               :currency="activeCurrency"
-              :hint="__('Optional minimum complete purchase price.')"
+              :hint="__('Rent per month. Daily rents are compared as 30 days.')"
             />
-            <CurrencyBudgetInput
-              v-model="filters.maxPrice"
-              :label="__('Maximum Total Budget')"
-              :currency="activeCurrency"
-              :hint="__('Maximum complete purchase budget.')"
-            />
-            <CurrencyBudgetInput
-              v-model="filters.downPaymentBudget"
-              :label="__('Maximum Down Payment')"
-              :currency="activeCurrency"
-              :hint="__('Optional maximum upfront payment.')"
-            />
-            <CurrencyBudgetInput
-              v-model="filters.monthlyInstallmentBudget"
-              :label="__('Maximum Monthly Installment')"
-              :currency="activeCurrency"
-              :hint="__('Optional — per month.')"
-            />
+            <template v-else>
+              <CurrencyBudgetInput
+                v-model="filters.minPrice"
+                :label="__('Minimum Total Price')"
+                :currency="activeCurrency"
+                :hint="__('Optional minimum complete purchase price.')"
+              />
+              <CurrencyBudgetInput
+                v-model="filters.maxPrice"
+                :label="__('Maximum Total Budget')"
+                :currency="activeCurrency"
+                :hint="__('Maximum complete purchase budget.')"
+              />
+              <CurrencyBudgetInput
+                v-model="filters.downPaymentBudget"
+                :label="__('Maximum Down Payment')"
+                :currency="activeCurrency"
+                :hint="__('Optional maximum upfront payment.')"
+              />
+              <CurrencyBudgetInput
+                v-model="filters.monthlyInstallmentBudget"
+                :label="__('Maximum Monthly Installment')"
+                :currency="activeCurrency"
+                :hint="__('Optional — per month.')"
+              />
+            </template>
             <label
               class="flex flex-col gap-1 text-xs font-medium text-ink-gray-6"
             >
@@ -418,12 +460,18 @@
 import CurrencyBudgetInput from '@/components/Controls/CurrencyBudgetInput.vue'
 import LinkControl from '@/components/Controls/Link.vue'
 import {
+  DEAL_BUY,
+  DEAL_RENT,
+  DEAL_TYPES,
   INVENTORY_SEARCH_SCOPES,
+  canRentCategory,
   compoundFilters,
   compoundIsCompatible,
   formatCurrencyAmount,
+  normalizeDealType,
   scopeForCategory,
   selectedUnitIsCompatible,
+  unitTypesForCategory,
 } from '@/utils/interestWorkflow'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { Button, Dialog, call, toast } from 'frappe-ui'
@@ -483,7 +531,10 @@ const strictFilters = ref(false)
 const currency = ref('')
 const availableCompounds = ref([])
 const searchScopes = INVENTORY_SEARCH_SCOPES
+const dealTypes = DEAL_TYPES
 const filterOptions = reactive({
+  unitCategories: [],
+  unitTypeCategories: {},
   unitTypes: ['Villa', 'Chalet', 'Apartment', 'Duplex', 'Penthouse'],
   finishingTypes: [
     'Core & Shell',
@@ -497,10 +548,13 @@ const filters = reactive({
   destination: '',
   project: '',
   developer: '',
+  dealType: DEAL_BUY,
+  unitCategory: '',
   unitType: '',
   finishingType: '',
   minPrice: '',
   maxPrice: '',
+  rentBudget: '',
   downPaymentBudget: '',
   monthlyInstallmentBudget: '',
   deliveryDate: '',
@@ -511,16 +565,30 @@ let compoundRequest = 0
 let matchRequest = 0
 
 const activeCurrency = computed(() => filters.budgetCurrency || currency.value)
+const canRent = computed(() => canRentCategory(localCategory.value))
+const isRent = computed(
+  () => normalizeDealType(filters.dealType, localCategory.value) === DEAL_RENT,
+)
+// Unit Category narrows the Unit Type choices to that category.
+const unitTypeChoices = computed(() =>
+  unitTypesForCategory(
+    filterOptions.unitTypes,
+    filterOptions.unitTypeCategories,
+    filters.unitCategory,
+  ),
+)
 const compoundLinkFilters = computed(() =>
   compoundFilters(filters.destination, filters.developer),
 )
 
 const categoryHint = computed(() =>
-  localScope.value === 'Both'
+  isRent.value
+    ? __('Showing owner-listed resale units listed for rent only.')
+    : localScope.value === 'Both'
     ? __('Showing eligible Resale and Primary inventory. Each selected Unit keeps its actual category.')
     : localScope.value === 'Resale'
-    ? __('Showing seller-owned resale inventory only.')
-    : __('Showing open developer inventory without a seller owner only.'),
+    ? __('Showing owner-listed resale inventory only.')
+    : __('Showing open developer inventory without an owner only.'),
 )
 
 const matchCriteria = computed(() => {
@@ -532,6 +600,11 @@ const matchCriteria = computed(() => {
     },
     { label: __('Compound'), value: profile.project },
     { label: __('Developer'), value: profile.developer },
+    {
+      label: __('Deal Type'),
+      value: profile.deal_type === DEAL_RENT ? __('Rent') : null,
+    },
+    { label: __('Unit Category'), value: profile.unit_category },
     { label: __('Unit Type'), value: profile.unit_type },
     { label: __('Finishing'), value: profile.finishing_type },
     {
@@ -541,7 +614,10 @@ const matchCriteria = computed(() => {
         : null,
     },
     {
-      label: __('Maximum Budget'),
+      label:
+        profile.deal_type === DEAL_RENT
+          ? __('Maximum Monthly Rent')
+          : __('Maximum Budget'),
       value: profile.budget
         ? formatPrice(profile.budget, profile.budget_currency)
         : null,
@@ -661,10 +737,16 @@ function clearFilterValues() {
     destination: '',
     project: '',
     developer: '',
+    dealType: normalizeDealType(
+      props.initialCriteria?.deal_type,
+      localCategory.value,
+    ),
+    unitCategory: '',
     unitType: '',
     finishingType: '',
     minPrice: '',
     maxPrice: '',
+    rentBudget: '',
     downPaymentBudget: '',
     monthlyInstallmentBudget: '',
     deliveryDate: '',
@@ -676,10 +758,19 @@ function applyProfileToFilters(profile) {
   filters.destination = profile.destination || ''
   filters.project = profile.project || ''
   filters.developer = profile.developer || ''
+  if (profile.deal_type)
+    filters.dealType = normalizeDealType(profile.deal_type, localCategory.value)
+  filters.unitCategory = profile.unit_category || ''
   filters.unitType = profile.unit_type || ''
   filters.finishingType = profile.finishing_type || ''
-  filters.minPrice = profile.budget_min || ''
-  filters.maxPrice = profile.budget || ''
+  if (filters.dealType === DEAL_RENT) {
+    filters.rentBudget = profile.rent_budget ?? profile.budget ?? ''
+    filters.minPrice = ''
+    filters.maxPrice = ''
+  } else {
+    filters.minPrice = profile.budget_min || ''
+    filters.maxPrice = profile.budget || ''
+  }
   filters.downPaymentBudget = profile.down_payment_budget ?? ''
   filters.monthlyInstallmentBudget = profile.monthly_installment_budget ?? ''
   filters.deliveryDate = profile.delivery_date || ''
@@ -700,8 +791,16 @@ function applyInitialCriteria() {
     criteria.preferred_developer ||
     criteria.developer ||
     ''
+  filters.dealType = normalizeDealType(criteria.deal_type, localCategory.value)
+  filters.unitCategory =
+    criteria.requested_unit_category ||
+    criteria.preferred_unit_category ||
+    criteria.unit_category ||
+    ''
   filters.unitType =
     criteria.requested_unit_type || criteria.preferred_unit_type || criteria.unit_type || ''
+  filters.rentBudget =
+    criteria.requested_rent_budget ?? criteria.rent_budget ?? ''
   filters.finishingType =
     criteria.requested_finishing_type ||
     criteria.preferred_finishing_type ||
@@ -725,6 +824,7 @@ function applyInitialCriteria() {
   localScope.value = scopeForCategory(
     props.interestCategory,
     criteria.inventory_search_scope || props.inventorySearchScope,
+    filters.dealType,
   )
 }
 
@@ -735,9 +835,12 @@ async function fetchFilterOptions() {
       {
         interest_category: localCategory.value,
         inventory_search_scope: localScope.value,
+        deal_type: normalizeDealType(filters.dealType, localCategory.value),
       },
     )
     if (result?.unit_types?.length) filterOptions.unitTypes = result.unit_types
+    filterOptions.unitCategories = result?.unit_categories || []
+    filterOptions.unitTypeCategories = result?.unit_type_categories || {}
     if (result?.finishing_types?.length)
       filterOptions.finishingTypes = result.finishing_types
     if (result?.currency) currency.value = result.currency
@@ -833,17 +936,22 @@ async function fetchUnits({ hydrateProfile = false } = {}) {
         lead: props.leadId,
         interest: props.interestId || null,
         interest_category: localCategory.value,
-        inventory_search_scope: localScope.value,
+        inventory_search_scope: isRent.value ? 'Resale' : localScope.value,
+        deal_type: isRent.value ? DEAL_RENT : DEAL_BUY,
         search: filters.search || null,
         destination: filters.destination || null,
         project: filters.project || null,
         developer: filters.developer || null,
+        unit_category: filters.unitCategory || null,
         physical_unit_type: filters.unitType || null,
         finishing_type: filters.finishingType || null,
-        min_price: filters.minPrice || null,
-        max_price: filters.maxPrice || null,
-        down_payment_budget: filters.downPaymentBudget || null,
-        monthly_installment_budget: filters.monthlyInstallmentBudget || null,
+        min_price: isRent.value ? null : filters.minPrice || null,
+        max_price: isRent.value ? null : filters.maxPrice || null,
+        rent_budget: isRent.value ? filters.rentBudget || null : null,
+        down_payment_budget: isRent.value ? null : filters.downPaymentBudget || null,
+        monthly_installment_budget: isRent.value
+          ? null
+          : filters.monthlyInstallmentBudget || null,
         delivery_date: filters.deliveryDate || null,
         budget_currency: filters.budgetCurrency || currency.value || null,
         include_unit: props.includeUnit || null,
@@ -929,6 +1037,27 @@ watch(localScope, () => {
   clearIncompatibleSelectedUnits()
   if (show.value) fetchUnits()
 })
+
+watch(
+  () => filters.dealType,
+  async (dealType, previous) => {
+    if (!show.value || dealType === previous) return
+    selectedUnits.value = []
+    selectedRecords.value = new Map()
+    if (dealType === DEAL_RENT) localScope.value = 'Resale'
+    await fetchFilterOptions()
+    fetchUnits()
+  },
+)
+
+watch(
+  () => filters.unitCategory,
+  (category) => {
+    const typeCategory = filterOptions.unitTypeCategories?.[filters.unitType]
+    if (category && filters.unitType && typeCategory && typeCategory !== category)
+      filters.unitType = ''
+  },
+)
 
 watch(
   () => [filters.destination, filters.developer],

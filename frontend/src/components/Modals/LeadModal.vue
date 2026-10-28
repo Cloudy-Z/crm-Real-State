@@ -136,7 +136,7 @@ async function createNewLead() {
           return error.value
         }
         if (!LEAD_ROLES.includes(lead.doc.party_type)) {
-          error.value = __('Party Role must be Buyer or Seller')
+          error.value = __('Party Role must be Buyer or Owner')
           return error.value
         }
         if (lead.doc.annual_revenue) {

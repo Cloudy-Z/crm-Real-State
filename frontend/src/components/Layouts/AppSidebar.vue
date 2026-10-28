@@ -277,9 +277,9 @@ const links = [
         to: { name: 'Buyers' },
       },
       {
-        label: 'Sellers',
+        label: 'Owners',
         icon: LeadsIcon,
-        to: { name: 'Sellers' },
+        to: { name: 'Owners' },
       },
     ],
   },
@@ -422,6 +422,8 @@ function isDuplicatedSidebarView(view) {
     'All Leads',
     'Buyers',
     'Buyer Leads',
+    'Owners',
+    'Owner Leads',
     'Sellers',
     'Seller Leads',
   ].includes(view.label)
@@ -438,7 +440,7 @@ function getIcon(routeName, icon) {
   switch (routeName) {
     case 'Leads':
     case 'Buyers':
-    case 'Sellers':
+    case 'Owners':
       return LeadsIcon
     case 'Deals':
       return DealsIcon

@@ -56,16 +56,16 @@
                 {{ linkedPropertiesDescription }}
               </div>
             </div>
-            <div v-if="isSellerLead" class="flex shrink-0 gap-2">
+            <div v-if="isOwnerLead" class="flex shrink-0 gap-2">
               <Button
                 :label="__('Add Property')"
                 variant="solid"
-                @click="addSellerProperty"
+                @click="addOwnerProperty"
               />
               <Button
                 :label="__('Assign Existing')"
                 variant="subtle"
-                @click="assignPropertyUnitToSeller"
+                @click="assignPropertyUnitToOwner"
               />
             </div>
           </div>
@@ -76,7 +76,7 @@
             >
               {{
                 __(
-                  'Select Buyer or Seller in the Party Role field. No buyer interest or seller property workflow is available until the role is valid.',
+                  'Select Buyer or Owner in the Party Role field. No buyer interest or owner property workflow is available until the role is valid.',
                 )
               }}
             </div>
@@ -193,7 +193,7 @@
                 </div>
               </div>
             </div>
-            <!-- Independent Buyer Interest Workboard / Seller Properties -->
+            <!-- Independent Buyer Interest Workboard / Owner Properties -->
             <template v-if="isBuyerLead">
               <div
                 v-if="actionContext.loading"
@@ -221,19 +221,19 @@
               />
             </template>
             <div
-              v-else-if="isSellerLead && linkedProperties.loading"
+              v-else-if="isOwnerLead && linkedProperties.loading"
               class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
             >
               {{ __('Loading linked properties...') }}
             </div>
             <div
-              v-else-if="isSellerLead && !visibleLinkedPropertyRows.length"
+              v-else-if="isOwnerLead && !visibleLinkedPropertyRows.length"
               class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
             >
               {{ linkedPropertiesEmptyText }}
             </div>
             <div
-              v-else-if="isSellerLead"
+              v-else-if="isOwnerLead"
               class="overflow-hidden rounded border border-outline-gray-1"
             >
               <table class="w-full text-left text-sm">
@@ -572,17 +572,21 @@ import {
 import { getView } from '@/utils/view'
 import { renderFieldLayoutDialog } from '@/utils/renderFieldLayoutDialog'
 import {
+  DEAL_RENT,
+  DEAL_TYPES,
+  canRentCategory,
   compoundFilters,
   isPropertyRequirement,
   isIsoCalendarDate,
   isValidCurrencyAmount,
+  normalizeDealType,
   requirementDialogDependencies,
   requestSnapshot,
   scopeForCategory,
 } from '@/utils/interestWorkflow'
 import {
   isBuyerLead as isBuyerLeadRecord,
-  isSellerLead as isSellerLeadRecord,
+  isOwnerLead as isOwnerLeadRecord,
   normalizeLeadListRouteName,
 } from '@/utils/leadRole'
 import { getSettings } from '@/stores/settings'
@@ -647,9 +651,9 @@ const canDelete = computed(() => permissions.data?.permissions?.delete || false)
 
 const doc = computed(() => document.doc || {})
 const isBuyerLead = computed(() => isBuyerLeadRecord(doc.value))
-const isSellerLead = computed(() => isSellerLeadRecord(doc.value))
+const isOwnerLead = computed(() => isOwnerLeadRecord(doc.value))
 const hasCanonicalPartyRole = computed(
-  () => isBuyerLead.value || isSellerLead.value,
+  () => isBuyerLead.value || isOwnerLead.value,
 )
 
 onMounted(async () => {
@@ -742,7 +746,7 @@ const tabs = computed(() => {
       name: 'Properties',
       label: isBuyerLead.value
         ? __('Interest')
-        : isSellerLead.value
+        : isOwnerLead.value
           ? __('Properties')
           : __('Party Role Required'),
       icon: LinkIcon,
@@ -813,21 +817,21 @@ const interestWorkboardRows = computed(
 )
 
 const visibleLinkedPropertyRows = computed(() => {
-  if (isSellerLead.value) {
+  if (isOwnerLead.value) {
     return linkedPropertyRows.value.filter(
       (row) => row.owner_lead === props.leadId,
     )
   }
   if (!isBuyerLead.value) return []
   return linkedPropertyRows.value.filter(
-    (row) => row.relationship !== 'Seller Unit',
+    (row) => !['Owner Unit', 'Seller Unit'].includes(row.relationship),
   )
 })
 
 const linkedPropertiesTitle = computed(() =>
   isBuyerLead.value
     ? __('Interest')
-    : isSellerLead.value
+    : isOwnerLead.value
       ? __('Properties')
       : __('Party Role Required'),
 )
@@ -835,18 +839,18 @@ const linkedPropertiesTitle = computed(() =>
 const linkedPropertiesDescription = computed(() =>
   isBuyerLead.value
     ? __('Buyer interest details plus one or many selected inventory units.')
-    : isSellerLead.value
+    : isOwnerLead.value
       ? __(
-        'Seller property onboarding list: property identity, compound, developer, type, finishing, asking price, and status.',
+        'Owner property list: property identity, compound, developer, type, listing purpose, price or rent, and status.',
         )
-      : __('Select Buyer or Seller in Party Role before using real-estate workflows.'),
+      : __('Select Buyer or Owner in Party Role before using real-estate workflows.'),
 )
 
 const linkedPropertiesEmptyText = computed(() =>
   isBuyerLead.value
     ? __('No interested units linked to this buyer lead yet.')
-    : isSellerLead.value
-      ? __('No seller properties assigned to this lead yet.')
+    : isOwnerLead.value
+      ? __('No owner properties assigned to this lead yet.')
       : __('Party Role is required.'),
 )
 
@@ -1099,6 +1103,10 @@ function selectInterestUnits(
   interestUnitCurrent.value = currentUnit || ''
   interestUnitCriteria.value = {
     ...criteria,
+    deal_type: criteria.deal_type ?? snapshot.dealType ?? 'Buy',
+    preferred_unit_category:
+      criteria.preferred_unit_category ?? snapshot.preferredUnitCategory ?? '',
+    rent_budget: criteria.rent_budget ?? snapshot.rentBudget ?? '',
     buyer_budget: criteria.buyer_budget ?? snapshot.buyerBudget ?? '',
     down_payment_budget:
       criteria.down_payment_budget ?? snapshot.downPaymentBudget ?? '',
@@ -1115,6 +1123,7 @@ function selectInterestUnits(
   interestUnitScope.value = scopeForCategory(
     category,
     interestUnitCriteria.value.inventory_search_scope,
+    interestUnitCriteria.value.deal_type,
   )
   interestUnitSelectionMode.value = multiple ? 'multiple' : 'single'
   showInterestUnitPicker.value = true
@@ -1143,9 +1152,53 @@ function openUnitRecord(unit) {
   })
 }
 
+// Unit Category narrows the Unit Type link to the types of that category.
+function unitTypeLinkFilters(unitCategory) {
+  return unitCategory ? { unit_category: unitCategory } : {}
+}
+
 function requestInterestFields(category, { editing = false, defaults = {} } = {}) {
   const snapshot = requestSnapshot(defaults)
+  const renting = normalizeDealType(defaults.deal_type, category) === DEAL_RENT
+  const budgetFields = renting
+    ? [
+        {
+          fieldname: 'rent_budget',
+          fieldtype: 'Currency',
+          label: __('Maximum Monthly Rent'),
+          options: 'budget_currency',
+        },
+      ]
+    : [
+        {
+          fieldname: 'buyer_budget',
+          fieldtype: 'Currency',
+          label: __('Maximum Total Budget'),
+          reqd: 0,
+        },
+        {
+          fieldname: 'down_payment_budget',
+          fieldtype: 'Currency',
+          label: __('Maximum Down Payment Budget'),
+        },
+        {
+          fieldname: 'monthly_installment_budget',
+          fieldtype: 'Currency',
+          label: __('Maximum Monthly Installment Budget (per month)'),
+        },
+      ]
   const requestFields = [
+    ...(canRentCategory(category)
+      ? [
+          {
+            fieldname: 'deal_type',
+            fieldtype: 'Select',
+            label: __('Deal Type'),
+            options: DEAL_TYPES.join('\n'),
+            reqd: 1,
+          },
+        ]
+      : []),
     {
       fieldname: 'preferred_destination',
       fieldtype: 'Link',
@@ -1154,27 +1207,19 @@ function requestInterestFields(category, { editing = false, defaults = {} } = {}
       reqd: isPropertyRequirement(category, defaults.international_type) ? 1 : 0,
     },
     {
+      fieldname: 'preferred_unit_category',
+      fieldtype: 'Link',
+      label: __('Preferred Unit Category'),
+      options: 'Real Estate Unit Category',
+    },
+    {
       fieldname: 'preferred_unit_type',
       fieldtype: 'Link',
       label: __('Preferred Unit Type'),
       options: 'Real Estate Unit Type',
+      link_filters: unitTypeLinkFilters(defaults.preferred_unit_category),
     },
-    {
-      fieldname: 'buyer_budget',
-      fieldtype: 'Currency',
-      label: __('Maximum Total Budget'),
-      reqd: 0,
-    },
-    {
-      fieldname: 'down_payment_budget',
-      fieldtype: 'Currency',
-      label: __('Maximum Down Payment Budget'),
-    },
-    {
-      fieldname: 'monthly_installment_budget',
-      fieldtype: 'Currency',
-      label: __('Maximum Monthly Installment Budget (per month)'),
-    },
+    ...budgetFields,
     {
       fieldname: 'preferred_delivery_date',
       fieldtype: 'Date',
@@ -1258,7 +1303,7 @@ function requestInterestFields(category, { editing = false, defaults = {} } = {}
   ]
 }
 
-async function loadInterestRequirementOptions(category, inventorySearchScope = '') {
+async function loadInterestRequirementOptions(category, inventorySearchScope = '', dealType = 'Buy') {
   try {
     return (
       (await call(
@@ -1266,6 +1311,7 @@ async function loadInterestRequirementOptions(category, inventorySearchScope = '
         {
           interest_category: category,
           inventory_search_scope: inventorySearchScope || null,
+          deal_type: normalizeDealType(dealType, category),
         },
       )) || {}
     )
@@ -1275,31 +1321,41 @@ async function loadInterestRequirementOptions(category, inventorySearchScope = '
 }
 
 function validateRequirementAmounts(values, category) {
-  for (const field of ['buyer_budget', 'down_payment_budget', 'monthly_installment_budget']) {
-    if (!isValidCurrencyAmount(values[field], { required: field === 'buyer_budget' && ['Resale', 'Primary'].includes(category) }))
+  const renting = normalizeDealType(values.deal_type, category) === DEAL_RENT
+  const inventory = ['Resale', 'Primary'].includes(category)
+  const amountFields = renting
+    ? ['rent_budget']
+    : ['buyer_budget', 'down_payment_budget', 'monthly_installment_budget']
+  const requiredField = renting ? 'rent_budget' : 'buyer_budget'
+  for (const field of amountFields) {
+    if (!isValidCurrencyAmount(values[field], { required: inventory && field === requiredField }))
       throw new Error(__('Budget amounts must be zero or positive.'))
   }
   if (values.preferred_delivery_date && !isIsoCalendarDate(values.preferred_delivery_date))
     throw new Error(__('Select a valid delivery date.'))
-  if ([values.buyer_budget, values.down_payment_budget, values.monthly_installment_budget].some((value) => value !== null && value !== undefined && value !== '') && !values.budget_currency)
+  if (amountFields.some((field) => values[field] !== null && values[field] !== undefined && values[field] !== '') && !values.budget_currency)
     throw new Error(__('Select Budget Currency or configure FCRM Settings currency.'))
 }
 
 async function collectInventoryInterestRequirements(category, defaults = {}) {
   const snapshot = requestSnapshot(defaults)
-  const inventorySearchScope = scopeForCategory(category, snapshot.inventorySearchScope)
-  const options = await loadInterestRequirementOptions(category, inventorySearchScope)
+  const dealType = normalizeDealType(snapshot.dealType, category)
+  const inventorySearchScope = scopeForCategory(category, snapshot.inventorySearchScope, dealType)
+  const options = await loadInterestRequirementOptions(category, inventorySearchScope, dealType)
   const finishing = [...new Set([snapshot.preferredFinishing, ...(options.finishing_types || [])].filter(Boolean))]
   return renderFieldLayoutDialog({
     title: __('Edit Requested Requirements — {0}', [category]),
     size: 'lg',
     defaults: {
+      deal_type: dealType,
       preferred_destination: snapshot.preferredDestination,
+      preferred_unit_category: snapshot.preferredUnitCategory,
       preferred_unit_type: snapshot.preferredUnitType,
       preferred_developer: snapshot.preferredDeveloper,
       preferred_compound: snapshot.preferredProject,
       preferred_finishing_type: snapshot.preferredFinishing,
       preferred_delivery_date: snapshot.preferredDeliveryDate,
+      rent_budget: snapshot.rentBudget,
       buyer_budget: snapshot.buyerBudget,
       down_payment_budget: snapshot.downPaymentBudget,
       monthly_installment_budget: snapshot.monthlyInstallmentBudget,
@@ -1307,22 +1363,51 @@ async function collectInventoryInterestRequirements(category, defaults = {}) {
       budget_currency: snapshot.budgetCurrency || options.currency || '',
     },
     fields: (values) => [
+      ...(canRentCategory(category)
+        ? [{ fieldname: 'deal_type', fieldtype: 'Select', label: __('Deal Type'), options: DEAL_TYPES.join('\n'), reqd: 1 }]
+        : []),
       { fieldname: 'preferred_destination', fieldtype: 'Link', label: __('Preferred Destination'), options: 'Real Estate Destination', reqd: 1 },
-      { fieldname: 'preferred_unit_type', fieldtype: 'Link', label: __('Preferred Unit Type'), options: 'Real Estate Unit Type', reqd: 1 },
-      { fieldname: 'buyer_budget', fieldtype: 'Currency', label: __('Maximum Total Budget'), options: 'budget_currency', reqd: 1 },
-      { fieldname: 'down_payment_budget', fieldtype: 'Currency', label: __('Maximum Down Payment Budget'), options: 'budget_currency' },
-      { fieldname: 'monthly_installment_budget', fieldtype: 'Currency', label: __('Maximum Monthly Installment Budget (per month)'), options: 'budget_currency' },
+      { fieldname: 'preferred_unit_category', fieldtype: 'Link', label: __('Preferred Unit Category'), options: 'Real Estate Unit Category' },
+      { fieldname: 'preferred_unit_type', fieldtype: 'Link', label: __('Preferred Unit Type'), options: 'Real Estate Unit Type', reqd: 1, link_filters: unitTypeLinkFilters(values.preferred_unit_category) },
+      ...(normalizeDealType(values.deal_type, category) === DEAL_RENT
+        ? [{ fieldname: 'rent_budget', fieldtype: 'Currency', label: __('Maximum Monthly Rent'), options: 'budget_currency', reqd: 1 }]
+        : [
+            { fieldname: 'buyer_budget', fieldtype: 'Currency', label: __('Maximum Total Budget'), options: 'budget_currency', reqd: 1 },
+            { fieldname: 'down_payment_budget', fieldtype: 'Currency', label: __('Maximum Down Payment Budget'), options: 'budget_currency' },
+            { fieldname: 'monthly_installment_budget', fieldtype: 'Currency', label: __('Maximum Monthly Installment Budget (per month)'), options: 'budget_currency' },
+          ]),
       { fieldname: 'budget_currency', fieldtype: 'Link', label: __('Budget Currency'), options: 'Currency', reqd: 1 },
-      { fieldname: 'inventory_search_scope', fieldtype: 'Select', label: __('Inventory Search Scope'), options: '\nResale\nPrimary\nBoth' },
+      // Rent requests always search Owner-listed Resale Units.
+      ...(normalizeDealType(values.deal_type, category) === DEAL_RENT
+        ? []
+        : [{ fieldname: 'inventory_search_scope', fieldtype: 'Select', label: __('Inventory Search Scope'), options: '\nResale\nPrimary\nBoth' }]),
       { fieldname: 'preferred_delivery_date', fieldtype: 'Date', label: __('Preferred Delivery Date') },
       { fieldname: 'preferred_developer', fieldtype: 'Link', label: __('Preferred Developer'), options: 'Property Developer' },
       { fieldname: 'preferred_compound', fieldtype: 'Link', label: __('Preferred Compound'), options: 'Real Estate Project', link_filters: compoundFilters(values.preferred_destination, values.preferred_developer) },
       { fieldname: 'preferred_finishing_type', fieldtype: 'Select', label: __('Preferred Finishing'), options: `\n${finishing.join('\n')}` },
     ],
-    onChange: requirementDialogDependencies(call),
+    onChange: withUnitCategoryDependency(
+      requirementDialogDependencies(call),
+      options.unit_type_categories || {},
+    ),
     onSubmit: (values) => validateRequirementAmounts(values, category),
     submitLabel: __('Save Requirements'),
   })
+}
+
+// Clear a Unit Type that does not belong to a newly chosen Unit Category.
+function withUnitCategoryDependency(onChange, typeCategories = {}) {
+  return async (values, previous = {}) => {
+    if (
+      values.preferred_unit_category !== previous.preferred_unit_category &&
+      values.preferred_unit_category &&
+      values.preferred_unit_type &&
+      typeCategories[values.preferred_unit_type] &&
+      typeCategories[values.preferred_unit_type] !== values.preferred_unit_category
+    )
+      values.preferred_unit_type = ''
+    return onChange(values, previous)
+  }
 }
 
 async function collectRequestInterest(
@@ -1393,9 +1478,12 @@ async function editInterestRecord(row) {
   const snapshot = requestSnapshot(row)
   if (['Resale', 'Primary'].includes(category)) {
     const requirements = await collectInventoryInterestRequirements(category, {
+      deal_type: row.deal_type,
       preferred_destination: row.requested_destination,
       preferred_area: row.requested_area,
+      preferred_unit_category: row.requested_unit_category,
       preferred_unit_type: row.requested_unit_type,
+      rent_budget: row.requested_rent_budget,
       preferred_developer: row.requested_developer,
       preferred_compound: row.requested_project,
       preferred_finishing_type: row.requested_finishing_type,
@@ -1432,9 +1520,12 @@ async function editInterestRecord(row) {
         international_type: row.international_type,
         international_country: row.international_country,
         international_details: row.international_details,
+        deal_type: normalizeDealType(snapshot.dealType, category),
         preferred_destination: snapshot.preferredDestination,
         preferred_area: row.requested_area || '',
+        preferred_unit_category: snapshot.preferredUnitCategory,
         preferred_unit_type: snapshot.preferredUnitType,
+        rent_budget: snapshot.rentBudget,
         preferred_developer: snapshot.preferredDeveloper,
         preferred_compound: snapshot.preferredProject,
         preferred_finishing_type: snapshot.preferredFinishing,
@@ -1445,6 +1536,7 @@ async function editInterestRecord(row) {
         inventory_search_scope: scopeForCategory(
           category,
           snapshot.inventorySearchScope,
+          snapshot.dealType,
         ),
         budget_currency: snapshot.budgetCurrency,
       },
@@ -1676,18 +1768,40 @@ async function editBuyerInterestPreferences() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Seller: Create or assign a property unit
+// Owner: Create or assign a property unit
 // ---------------------------------------------------------------------------
-async function addSellerProperty() {
-  if (!isSellerLead.value) {
-    toast.error(__('Add Property is available only for Seller leads.'))
+const OWNER_INTENT_LISTING_PURPOSE = {
+  Sell: 'For Sale',
+  Rent: 'For Rent',
+  'Sell or Rent': 'For Sale or Rent',
+}
+const RENT_LISTING =
+  "['For Rent', 'For Sale or Rent'].includes(doc.listing_purpose)"
+const SALE_LISTING =
+  "['For Sale', 'For Sale or Rent'].includes(doc.listing_purpose)"
+
+async function addOwnerProperty() {
+  if (!isOwnerLead.value) {
+    toast.error(__('Add Property is available only for Owner leads.'))
     return
   }
 
   const values = await renderFieldLayoutDialog({
-    title: __('Add Seller Property'),
+    title: __('Add Owner Property'),
     size: 'lg',
+    // The Owner's intent pre-selects the purpose; the agent can change it per Unit.
+    defaults: {
+      listing_purpose:
+        OWNER_INTENT_LISTING_PURPOSE[doc.value.owner_intent] || 'For Sale',
+    },
     fields: [
+      {
+        fieldname: 'listing_purpose',
+        fieldtype: 'Select',
+        label: __('Listing Purpose'),
+        options: 'For Sale\nFor Rent\nFor Sale or Rent',
+        reqd: 1,
+      },
       {
         fieldname: 'project',
         fieldtype: 'Link',
@@ -1743,21 +1857,38 @@ async function addSellerProperty() {
         fieldname: 'paid',
         fieldtype: 'Currency',
         label: __('Paid'),
+        depends_on: `eval:${SALE_LISTING}`,
       },
       {
         fieldname: 'over_price',
         fieldtype: 'Currency',
         label: __('Over Price'),
+        depends_on: `eval:${SALE_LISTING}`,
       },
       {
         fieldname: 'over_is_gross',
         fieldtype: 'Check',
         label: __('Over Is Gross'),
+        depends_on: `eval:${SALE_LISTING}`,
       },
       {
         fieldname: 'remaining',
         fieldtype: 'Currency',
         label: __('Remaining'),
+        depends_on: `eval:${SALE_LISTING}`,
+      },
+      {
+        fieldname: 'rental_monthly_rate',
+        fieldtype: 'Currency',
+        label: __('Monthly Rent'),
+        depends_on: `eval:${RENT_LISTING}`,
+        description: __('Enter a monthly or a daily rent.'),
+      },
+      {
+        fieldname: 'rental_daily_rate',
+        fieldtype: 'Currency',
+        label: __('Daily Rent'),
+        depends_on: `eval:${RENT_LISTING}`,
       },
     ],
     submitLabel: __('Create Property'),
@@ -1770,6 +1901,18 @@ async function addSellerProperty() {
     !values?.delivery_date
   )
     return
+  const forSale = ['For Sale', 'For Sale or Rent'].includes(
+    values.listing_purpose,
+  )
+  const forRent = ['For Rent', 'For Sale or Rent'].includes(
+    values.listing_purpose,
+  )
+  if (forRent && !values.rental_monthly_rate && !values.rental_daily_rate) {
+    toast.error(
+      __('Enter the monthly or daily rent for a Unit listed for rent.'),
+    )
+    return
+  }
 
   try {
     await call('real_estate_crm_customs.api.create_resale_unit', {
@@ -1782,23 +1925,27 @@ async function addSellerProperty() {
       bedrooms: values.bedrooms || 0,
       bathrooms: values.bathrooms || 0,
       bua: values.bua || null,
-      paid: values.paid || null,
-      over_price: values.over_price || null,
-      over_is_gross: values.over_is_gross ? 1 : 0,
-      remaining: values.remaining || null,
+      listing_purpose: values.listing_purpose,
+      // Sale amounts are not sent for a rent-only Unit, and rents only when renting.
+      paid: forSale ? values.paid || null : null,
+      over_price: forSale ? values.over_price || null : null,
+      over_is_gross: forSale && values.over_is_gross ? 1 : 0,
+      remaining: forSale ? values.remaining || null : null,
+      rental_monthly_rate: forRent ? values.rental_monthly_rate || null : null,
+      rental_daily_rate: forRent ? values.rental_daily_rate || null : null,
     })
     reloadActionWeb()
-    toast.success(__('Seller property created and linked to this lead.'))
+    toast.success(__('Owner property created and linked to this lead.'))
   } catch (err) {
     toast.error(
-      err.messages?.[0] || err.message || __('Error creating seller property'),
+      err.messages?.[0] || err.message || __('Error creating owner property'),
     )
   }
 }
 
-async function assignPropertyUnitToSeller() {
-  if (!isSellerLead.value) {
-    toast.error(__('Only seller leads can be assigned property units'))
+async function assignPropertyUnitToOwner() {
+  if (!isOwnerLead.value) {
+    toast.error(__('Only owner leads can be assigned property units'))
     return
   }
 
@@ -1818,12 +1965,12 @@ async function assignPropertyUnitToSeller() {
 
   if (!values?.unit) return
 
-  await call('real_estate_crm_customs.api.assign_property_unit_to_seller', {
+  await call('real_estate_crm_customs.api.assign_property_unit_to_owner', {
     lead: props.leadId,
     unit: values.unit,
   })
   reloadActionWeb()
-  toast.success(__('Property unit assigned to this seller lead'))
+  toast.success(__('Property unit assigned to this owner lead'))
 }
 
 // ---------------------------------------------------------------------------

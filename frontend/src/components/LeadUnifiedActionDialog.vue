@@ -235,7 +235,7 @@
                 :options="[
                   'Completed',
                   'Buyer No Show',
-                  'Seller/Unit Unavailable',
+                  'Owner/Unit Unavailable',
                   'Cancelled',
                   'Rescheduled',
                 ]"
@@ -398,6 +398,13 @@
                 ]"
                 required
               />
+              <SelectField
+                v-if="canRentInterest"
+                v-model="draft.dealType"
+                :label="__('Deal Type')"
+                :options="dealTypes"
+                required
+              />
               <template v-if="hasPropertyCriteria">
                 <LinkControl
                   v-model="draft.preferredDestination"
@@ -413,30 +420,51 @@
                   {{ __('Select its canonical Destination before submitting.') }}
                 </p>
                 <LinkControl
+                  v-model="draft.preferredUnitCategory"
+                  doctype="Real Estate Unit Category"
+                  :label="__('Preferred Unit Category')"
+                  :placeholder="__('Select a unit category')"
+                />
+                <LinkControl
                   v-model="draft.preferredUnitType"
                   doctype="Real Estate Unit Type"
                   :label="__('Preferred Unit Type')"
-                  :placeholder="__('Select a unit type')"
+                  :placeholder="
+                    draft.preferredUnitCategory
+                      ? __('Unit types in {0}', [draft.preferredUnitCategory])
+                      : __('Select a unit type')
+                  "
+                  :filters="unitTypeLinkFilters"
                 />
                 <CurrencyBudgetInput
-                  v-model="draft.buyerBudget"
-                  :label="__('Maximum Total Budget')"
+                  v-if="isRentRequest"
+                  v-model="draft.rentBudget"
+                  :label="__('Maximum Monthly Rent')"
                   :currency="activeBudgetCurrency"
                   :required="isInventoryInterest"
-                  :hint="__('Maximum complete purchase budget, not a monthly payment.')"
+                  :hint="__('Rent per month. Daily rents are compared as 30 days.')"
                 />
-                <CurrencyBudgetInput
-                  v-model="draft.downPaymentBudget"
-                  :label="__('Maximum Down Payment Budget')"
-                  :currency="activeBudgetCurrency"
-                  :hint="__('Optional maximum upfront-payment affordability.')"
-                />
-                <CurrencyBudgetInput
-                  v-model="draft.monthlyInstallmentBudget"
-                  :label="__('Maximum Monthly Installment Budget')"
-                  :currency="activeBudgetCurrency"
-                  :hint="__('Optional — per month.')"
-                />
+                <template v-else>
+                  <CurrencyBudgetInput
+                    v-model="draft.buyerBudget"
+                    :label="__('Maximum Total Budget')"
+                    :currency="activeBudgetCurrency"
+                    :required="isInventoryInterest"
+                    :hint="__('Maximum complete purchase budget, not a monthly payment.')"
+                  />
+                  <CurrencyBudgetInput
+                    v-model="draft.downPaymentBudget"
+                    :label="__('Maximum Down Payment Budget')"
+                    :currency="activeBudgetCurrency"
+                    :hint="__('Optional maximum upfront-payment affordability.')"
+                  />
+                  <CurrencyBudgetInput
+                    v-model="draft.monthlyInstallmentBudget"
+                    :label="__('Maximum Monthly Installment Budget')"
+                    :currency="activeBudgetCurrency"
+                    :hint="__('Optional — per month.')"
+                  />
+                </template>
                 <div class="field-label">
                   {{ __('Budget Currency') }}
                   <LinkControl
@@ -452,12 +480,18 @@
                   {{ __('Currency is not configured. Set FCRM Settings currency before matching or saving budgets.') }}
                 </p>
                 <SelectField
-                  v-if="isInventoryInterest"
+                  v-if="isInventoryInterest && !isRentRequest"
                   v-model="draft.inventorySearchScope"
                   :label="__('Inventory Search Scope')"
                   :options="inventorySearchScopes"
                   required
                 />
+                <p
+                  v-else-if="isInventoryInterest"
+                  class="self-end rounded bg-surface-gray-1 px-3 py-2 text-xs text-ink-gray-6"
+                >
+                  {{ __('Rent requests search Owner-listed Resale Units listed for rent.') }}
+                </p>
                 <LinkControl
                   v-model="draft.preferredProject"
                   doctype="Real Estate Project"
@@ -812,9 +846,12 @@ import CurrencyBudgetInput from '@/components/Controls/CurrencyBudgetInput.vue'
 import LinkControl from '@/components/Controls/Link.vue'
 import {
   CANONICAL_MEETING_PURPOSES,
+  DEAL_RENT,
+  DEAL_TYPES,
   INVENTORY_SEARCH_SCOPES,
   buildInterestCriteriaPayload,
   canBeginClosing,
+  canRentCategory,
   closingNeedsSuccessor,
   closingProjectedStatus,
   compoundFilters,
@@ -825,8 +862,10 @@ import {
   isIsoCalendarDate,
   isIsoDateOnOrBeforeToday,
   isPropertyRequirement,
+  isRentDeal,
   isTerminalInterestStatus,
   isValidCurrencyAmount,
+  normalizeDealType,
   requestSnapshot,
   scopeForCategory,
   selectedUnitIsCompatible,
@@ -981,6 +1020,7 @@ const filterOptions = reactive({
     'Ultra Super Lux',
   ],
   currency: '',
+  unitTypeCategories: {},
 })
 const availableCompounds = ref([])
 const selectedUnitRecords = ref(new Map())
@@ -990,6 +1030,7 @@ let matchRequest = 0
 const draft = reactive({})
 const router = useRouter()
 const inventorySearchScopes = INVENTORY_SEARCH_SCOPES
+const dealTypes = DEAL_TYPES
 const todayIso = frappeNowDateTime().slice(0, 10)
 const activeBudgetCurrency = computed(() => draft.budgetCurrency || filterOptions.currency || '')
 
@@ -1068,6 +1109,17 @@ const isInventoryInterest = computed(() =>
 const hasPropertyCriteria = computed(() =>
   isPropertyRequirement(draft.interestCategory, draft.internationalType),
 )
+const canRentInterest = computed(() => canRentCategory(draft.interestCategory))
+const isRentRequest = computed(() => isRentDeal(draft))
+// The comparable budget for matching: monthly rent when renting, total price when buying.
+const matchBudget = computed(() =>
+  isRentRequest.value ? draft.rentBudget : draft.buyerBudget,
+)
+const unitTypeLinkFilters = computed(() =>
+  draft.preferredUnitCategory
+    ? { unit_category: draft.preferredUnitCategory }
+    : {},
+)
 const showSmartMatch = computed(
   () => showInterestBlock.value && isInventoryInterest.value,
 )
@@ -1133,8 +1185,8 @@ const counterpartyMeetingTitle = computed(() =>
 )
 const counterpartyMeetingDescription = computed(() =>
   isDeveloperMeeting.value
-    ? __('Developer Meeting is limited to one active Primary unit with its actual developer and no seller owner.')
-    : __('Owner Meeting is limited to one active seller-owned Resale unit.'),
+    ? __('Developer Meeting is limited to one active Primary unit with its actual developer and no owner.')
+    : __('Owner Meeting is limited to one active owner-listed Resale unit.'),
 )
 const counterpartyMeetingSelectionLabel = computed(() =>
   isDeveloperMeeting.value ? __('Primary Unit / Developer') : __('Resale Unit / Owner'),
@@ -1216,7 +1268,10 @@ function resetDraft() {
     preferredDestination: snapshot.preferredDestination,
     legacyPreferredArea:
       scopedInterest.value?.requested_area || props.lead?.preferred_area || '',
+    dealType: snapshot.dealType,
+    preferredUnitCategory: snapshot.preferredUnitCategory,
     preferredUnitType: snapshot.preferredUnitType,
+    rentBudget: snapshot.rentBudget,
     buyerBudget: snapshot.buyerBudget,
     downPaymentBudget: snapshot.downPaymentBudget,
     monthlyInstallmentBudget: snapshot.monthlyInstallmentBudget,
@@ -1224,6 +1279,7 @@ function resetDraft() {
     inventorySearchScope: scopeForCategory(
       isMatchRequested.value ? scopedInterest.value?.interest_category : '',
       snapshot.inventorySearchScope,
+      snapshot.dealType,
     ),
     preferredProject: snapshot.preferredProject,
     preferredDeveloper: snapshot.preferredDeveloper,
@@ -1263,6 +1319,7 @@ async function loadFilterOptions() {
       {
         interest_category: draft.interestCategory,
         inventory_search_scope: draft.inventorySearchScope || null,
+        deal_type: normalizeDealType(draft.dealType, draft.interestCategory),
       },
     )
     if (result?.unit_types?.length)
@@ -1270,6 +1327,7 @@ async function loadFilterOptions() {
         result.unit_types,
         draft.preferredUnitType,
       )
+    filterOptions.unitTypeCategories = result?.unit_type_categories || {}
     if (result?.finishing_types?.length)
       filterOptions.finishingTypes = mergeCurrentOption(
         result.finishing_types,
@@ -1298,20 +1356,32 @@ async function loadMatches() {
         inventory_search_scope: scopeForCategory(
           draft.interestCategory,
           draft.inventorySearchScope,
+          draft.dealType,
         ),
+        deal_type: normalizeDealType(draft.dealType, draft.interestCategory),
         search: draft.matchSearch || null,
         destination: draft.preferredDestination || '',
         project: draft.preferredProject || '',
         developer: draft.preferredDeveloper || '',
+        unit_category: draft.preferredUnitCategory || '',
         physical_unit_type: draft.preferredUnitType || null,
         finishing_type: draft.preferredFinishing || null,
-        max_price: hasValue(draft.buyerBudget) ? draft.buyerBudget : null,
-        down_payment_budget: hasValue(draft.downPaymentBudget)
-          ? draft.downPaymentBudget
-          : '',
-        monthly_installment_budget: hasValue(draft.monthlyInstallmentBudget)
-          ? draft.monthlyInstallmentBudget
-          : '',
+        max_price:
+          !isRentRequest.value && hasValue(draft.buyerBudget)
+            ? draft.buyerBudget
+            : null,
+        rent_budget:
+          isRentRequest.value && hasValue(draft.rentBudget)
+            ? draft.rentBudget
+            : '',
+        down_payment_budget:
+          !isRentRequest.value && hasValue(draft.downPaymentBudget)
+            ? draft.downPaymentBudget
+            : '',
+        monthly_installment_budget:
+          !isRentRequest.value && hasValue(draft.monthlyInstallmentBudget)
+            ? draft.monthlyInstallmentBudget
+            : '',
         delivery_date: draft.preferredDeliveryDate || '',
         budget_currency: draft.budgetCurrency || filterOptions.currency || null,
         strict_filters: draft.strictFilters ? 1 : 0,
@@ -1352,18 +1422,43 @@ function validateInterestRequirements({ requireResolution = true } = {}) {
   if (hasPropertyCriteria.value) {
     if (
       !draft.preferredDestination ||
-      (isInventoryInterest.value && (!draft.preferredUnitType || !hasValue(draft.buyerBudget)))
+      (isInventoryInterest.value && (!draft.preferredUnitType || !hasValue(matchBudget.value)))
     ) {
-      toast.error(__('Destination, unit type, and maximum budget are required.'))
+      toast.error(
+        isRentRequest.value
+          ? __('Destination, unit type, and maximum monthly rent are required.')
+          : __('Destination, unit type, and maximum budget are required.'),
+      )
       return false
     }
-    if (!isValidCurrencyAmount(draft.buyerBudget, { required: isInventoryInterest.value })) {
+    if (
+      draft.preferredUnitCategory &&
+      draft.preferredUnitType &&
+      filterOptions.unitTypeCategories?.[draft.preferredUnitType] &&
+      filterOptions.unitTypeCategories[draft.preferredUnitType] !==
+        draft.preferredUnitCategory
+    ) {
+      toast.error(
+        __('Unit Type {0} is not in Unit Category {1}.', [
+          draft.preferredUnitType,
+          draft.preferredUnitCategory,
+        ]),
+      )
+      return false
+    }
+    if (isRentRequest.value) {
+      if (!isValidCurrencyAmount(draft.rentBudget, { required: isInventoryInterest.value })) {
+        toast.error(__('Maximum monthly rent must be zero or a positive amount.'))
+        return false
+      }
+    } else if (!isValidCurrencyAmount(draft.buyerBudget, { required: isInventoryInterest.value })) {
       toast.error(__('Maximum total budget must be zero or a positive amount.'))
       return false
     }
     if (
-      !isValidCurrencyAmount(draft.downPaymentBudget) ||
-      !isValidCurrencyAmount(draft.monthlyInstallmentBudget)
+      !isRentRequest.value &&
+      (!isValidCurrencyAmount(draft.downPaymentBudget) ||
+        !isValidCurrencyAmount(draft.monthlyInstallmentBudget))
     ) {
       toast.error(__('Optional budget amounts must be zero or positive.'))
       return false
@@ -1643,7 +1738,12 @@ function projectedInterestStatus() {
         }[draft.unitOutcome] || current
       )
     if (
-      ['Buyer No Show', 'Seller/Unit Unavailable', 'Cancelled'].includes(
+      [
+        'Buyer No Show',
+        'Owner/Unit Unavailable',
+        'Seller/Unit Unavailable',
+        'Cancelled',
+      ].includes(
         draft.outcome,
       )
     )
@@ -2025,9 +2125,38 @@ watch(
     matches.value = []
     draft.selectedUnits = []
     draft.requestedUnit = false
-    draft.inventorySearchScope = draft.inventorySearchScope === 'Both'
-      ? 'Both' : scopeForCategory(category)
+    // Primary and International requests are always purchases.
+    draft.dealType = normalizeDealType(draft.dealType, category)
+    draft.inventorySearchScope = draft.inventorySearchScope === 'Both' &&
+      draft.dealType !== DEAL_RENT
+      ? 'Both' : scopeForCategory(category, '', draft.dealType)
     if (category) await loadFilterOptions()
+  },
+)
+watch(
+  () => draft.dealType,
+  async (dealType, previous) => {
+    if (!show.value || dealType === previous || previous === undefined) return
+    matchRequest += 1
+    matches.value = []
+    draft.selectedUnits = []
+    draft.inventorySearchScope = scopeForCategory(
+      draft.interestCategory,
+      dealType === DEAL_RENT ? '' : draft.inventorySearchScope,
+      dealType,
+    )
+    if (draft.interestCategory) await loadFilterOptions()
+  },
+)
+watch(
+  () => draft.preferredUnitCategory,
+  (category, previous) => {
+    if (!show.value || category === previous || previous === undefined) return
+    // A Unit Type from another category no longer fits the narrowed list.
+    const typeCategory = filterOptions.unitTypeCategories?.[draft.preferredUnitType]
+    if (category && draft.preferredUnitType && typeCategory && typeCategory !== category) {
+      draft.preferredUnitType = ''
+    }
   },
 )
 
@@ -2065,8 +2194,11 @@ let matchRefreshTimer = null
 watch(
   () => [
     draft.interestCategory,
+    draft.dealType,
     draft.preferredDestination,
+    draft.preferredUnitCategory,
     draft.preferredUnitType,
+    draft.rentBudget,
     draft.buyerBudget,
     draft.downPaymentBudget,
     draft.monthlyInstallmentBudget,
@@ -2085,7 +2217,7 @@ watch(
     if (
       !showSmartMatch.value ||
       !draft.preferredDestination ||
-      (isInventoryInterest.value && (!draft.preferredUnitType || !hasValue(draft.buyerBudget)))
+      (isInventoryInterest.value && (!draft.preferredUnitType || !hasValue(matchBudget.value)))
     )
       return
     matchRefreshTimer = setTimeout(loadMatches, 450)

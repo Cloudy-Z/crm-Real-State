@@ -1,14 +1,20 @@
 export const LEAD_ROLE_FIELD = 'party_type'
 export const BUYER_ROLE = 'Buyer'
-export const SELLER_ROLE = 'Seller'
-export const LEAD_ROLES = Object.freeze([BUYER_ROLE, SELLER_ROLE])
-export const LEAD_LIST_ROUTES = Object.freeze(['Leads', 'Buyers', 'Sellers'])
+export const OWNER_ROLE = 'Owner'
+// Stored value before the Seller -> Owner rename. The backend migration rewrites it,
+// but cached documents and old links may still carry it for a while.
+export const LEGACY_OWNER_ROLE = 'Seller'
+export const LEAD_ROLES = Object.freeze([BUYER_ROLE, OWNER_ROLE])
+export const OWNER_LIST_ROUTE = 'Owners'
+export const LEGACY_OWNER_LIST_ROUTE = 'Sellers'
+export const LEAD_LIST_ROUTES = Object.freeze(['Leads', 'Buyers', OWNER_LIST_ROUTE])
 export const LEGACY_LEAD_ROLE_FIELDS = Object.freeze([
   'custom_type',
   'lead_type',
 ])
 
 export function normalizeLeadRole(value) {
+  if (value === LEGACY_OWNER_ROLE) return OWNER_ROLE
   return typeof value === 'string' && LEAD_ROLES.includes(value) ? value : null
 }
 
@@ -16,15 +22,17 @@ export function isBuyerLead(lead) {
   return normalizeLeadRole(lead?.[LEAD_ROLE_FIELD]) === BUYER_ROLE
 }
 
-export function isSellerLead(lead) {
-  return normalizeLeadRole(lead?.[LEAD_ROLE_FIELD]) === SELLER_ROLE
+export function isOwnerLead(lead) {
+  return normalizeLeadRole(lead?.[LEAD_ROLE_FIELD]) === OWNER_ROLE
 }
 
 export function roleFromRouteQuery(query = {}) {
   const routeValue = String(query.party_type || query.lead_scope || '')
     .trim()
     .toLowerCase()
-  if (['seller', 'sellers'].includes(routeValue)) return SELLER_ROLE
+  if (['owner', 'owners', 'seller', 'sellers'].includes(routeValue)) {
+    return OWNER_ROLE
+  }
   if (['buyer', 'buyers'].includes(routeValue)) return BUYER_ROLE
   return null
 }
@@ -115,16 +123,20 @@ export function normalizeLeadViewRows(rows) {
 
 export function leadListRouteForRole(role) {
   if (role === BUYER_ROLE) return 'Buyers'
-  if (role === SELLER_ROLE) return 'Sellers'
+  if (role === OWNER_ROLE) return OWNER_LIST_ROUTE
   return 'Leads'
 }
 
 export function normalizeLeadListRouteName(value) {
+  if (value === LEGACY_OWNER_LIST_ROUTE) return OWNER_LIST_ROUTE
   return LEAD_LIST_ROUTES.includes(value) ? value : 'Leads'
 }
 
 export function normalizeLegacyLeadViewRoute(view) {
   if (!view) return view
+  if (view.route_name === LEGACY_OWNER_LIST_ROUTE) {
+    view.route_name = OWNER_LIST_ROUTE
+  }
   if (
     view.dt !== 'CRM Lead' &&
     !LEAD_LIST_ROUTES.includes(view.route_name)

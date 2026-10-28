@@ -37,11 +37,24 @@ const routes = [
     meta: { partyType: 'Buyer', label: 'Buyers' },
   },
   {
-    alias: '/sellers',
-    path: '/sellers/view/:viewType?',
-    name: 'Sellers',
+    alias: '/owners',
+    path: '/owners/view/:viewType?',
+    name: 'Owners',
     component: () => import('@/pages/Leads.vue'),
-    meta: { partyType: 'Seller', label: 'Sellers' },
+    meta: { partyType: 'Owner', label: 'Owners' },
+  },
+  // Seller was renamed to Owner; keep bookmarks and shared links working.
+  {
+    path: '/sellers/view/:viewType?',
+    redirect: (to) => ({
+      name: 'Owners',
+      params: to.params,
+      query: to.query,
+    }),
+  },
+  {
+    path: '/sellers',
+    redirect: (to) => ({ name: 'Owners', query: to.query }),
   },
   {
     path: '/leads/:leadId',
@@ -219,7 +232,7 @@ router.beforeEach(async (to, from, next) => {
     [
       'Leads',
       'Buyers',
-      'Sellers',
+      'Owners',
       'Deals',
       'Contacts',
       'Organizations',
@@ -240,7 +253,7 @@ router.beforeEach(async (to, from, next) => {
       const doctypeMap = {
         Leads: 'CRM Lead',
         Buyers: 'CRM Lead',
-        Sellers: 'CRM Lead',
+        Owners: 'CRM Lead',
         Deals: 'CRM Deal',
         Contacts: 'Contact',
         Organizations: 'CRM Organization',
