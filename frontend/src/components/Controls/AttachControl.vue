@@ -82,6 +82,7 @@ const props = defineProps({
   fieldname: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
   imageOnly: { type: Boolean, default: false },
+  private: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['change'])
@@ -155,6 +156,7 @@ const iconClasses = computed(
 const uploaderOptions = computed(() => {
   return {
     folder: 'Home/Attachments',
+    private: props.private,
     allowMultiple: false,
     restrictions: {
       maxNumberOfFiles: 1,

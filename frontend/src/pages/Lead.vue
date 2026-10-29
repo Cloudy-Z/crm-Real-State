@@ -220,20 +220,29 @@
                 @open-unit="openUnitRecord"
               />
             </template>
+            <div v-if="isOwnerLead" class="mb-5">
+              <OwnerListingWorkflow
+                :context="ownerWorkflow.data || {}"
+                :loading="ownerWorkflow.loading"
+                @run-action="runOwnerWorkflowAction"
+                @reschedule-action="rescheduleOwnerWorkflowAction"
+                @open-unit="openUnitRecord"
+              />
+            </div>
             <div
-              v-else-if="isOwnerLead && linkedProperties.loading"
+              v-if="isOwnerLead && linkedProperties.loading"
               class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
             >
               {{ __('Loading linked properties...') }}
             </div>
             <div
-              v-else-if="isOwnerLead && !visibleLinkedPropertyRows.length"
+              v-if="isOwnerLead && !linkedProperties.loading && !visibleLinkedPropertyRows.length"
               class="rounded border border-outline-gray-1 p-5 text-sm text-ink-gray-6"
             >
               {{ linkedPropertiesEmptyText }}
             </div>
             <div
-              v-else-if="isOwnerLead"
+              v-if="isOwnerLead && !linkedProperties.loading && visibleLinkedPropertyRows.length"
               class="overflow-hidden rounded border border-outline-gray-1"
             >
               <table class="w-full text-left text-sm">
@@ -562,6 +571,7 @@ import LeadProgressGraph from '@/components/LeadProgressGraph.vue'
 import LeadSmartEvents from '@/components/LeadSmartEvents.vue'
 import LeadInterestWorkboard from '@/components/LeadInterestWorkboard.vue'
 import LeadActionWeb from '@/components/LeadActionWeb.vue'
+import OwnerListingWorkflow from '@/components/OwnerListingWorkflow.vue'
 import LeadUnifiedActionDialog from '@/components/LeadUnifiedActionDialog.vue'
 import {
   setupCustomizations,
@@ -805,6 +815,22 @@ const actionContext = createResource({
   params: { lead: props.leadId },
   auto: true,
 })
+
+const ownerWorkflow = createResource({
+  url: 'real_estate_crm_customs.owner_workflow.get_owner_workflow_context',
+  cache: ['ownerWorkflowContext', props.leadId],
+  params: { lead: props.leadId },
+  auto: false,
+})
+
+async function reloadOwnerWorkflow() {
+  if (!isOwnerLead.value) return
+  await ownerWorkflow.reload()
+}
+
+watch(isOwnerLead, (isOwner) => {
+  if (isOwner) reloadOwnerWorkflow()
+}, { immediate: true })
 
 const lastStatusAction = computed(
   () => leadProgress.data?.last_status_action || null,
@@ -1665,6 +1691,7 @@ function reloadActionWeb() {
   leadProgress.reload()
   smartEvents.value?.reload?.()
   actionContext.reload()
+  reloadOwnerWorkflow()
   activities.value?.all_activities?.reload?.()
 }
 
@@ -1768,177 +1795,269 @@ async function editBuyerInterestPreferences() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Owner: Create or assign a property unit
 // ---------------------------------------------------------------------------
+// Owner guided listing workflow (separate from Buyer Interest actions)
+// ---------------------------------------------------------------------------
+function actionReference(action) {
+  return action?.name ? { action_name: action.name } : {
+    action_type: action.action_type,
+    purpose: action.purpose,
+    unit: action.unit,
+  }
+}
+
+async function runOwnerWorkflowAction(action) {
+  if (!isOwnerLead.value || !action?.action_type) {
+    toast.error(__('Owner workflow is available only for Owner leads.'))
+    return
+  }
+  if (action.action_type === 'Add Property') {
+    await addOwnerProperty()
+    return
+  }
+
+  const values = await ownerActionDialogValues(action)
+  if (!values) return
+  const payload = { ...actionReference(action), ...values }
+  try {
+    const result = await call(
+      'real_estate_crm_customs.owner_workflow.submit_owner_action',
+      {
+        lead: props.leadId,
+        payload,
+        expected_modified: action.name ? action.modified : undefined,
+      },
+    )
+    if (result?.context?.lead_status) doc.value.status = result.context.lead_status
+    reloadActionWeb()
+    toast.success(__('Owner workflow action saved.'))
+  } catch (err) {
+    toast.error(
+      err.messages?.[0] || err.message || __('Could not save Owner workflow action.'),
+    )
+  }
+}
+
+async function ownerActionDialogValues(action) {
+  const common = [
+    {
+      fieldname: 'result_note',
+      fieldtype: 'Small Text',
+      label: __('Notes'),
+      description: __('Optional; record only useful details from this action.'),
+    },
+  ]
+  if (action.action_type === 'Call') {
+    if (action.purpose === 'Availability Verification') {
+      return renderFieldLayoutDialog({
+        title: __('Availability Verification'),
+        fields: [
+          {
+            fieldname: 'outcome', fieldtype: 'Select', label: __('Availability Result'), reqd: 1,
+            options: 'Still Available\nTemporarily Unavailable\nRe-price\nWithdrawn\nSold Elsewhere',
+          },
+          {
+            fieldname: 'next_verification_due', fieldtype: 'Date', label: __('Next Verification Date'),
+            depends_on: "eval:doc.outcome == 'Temporarily Unavailable'",
+          },
+          { fieldname: 'updated_monthly_rent', fieldtype: 'Currency', label: __('Updated Monthly Rent') },
+          { fieldname: 'updated_daily_rent', fieldtype: 'Currency', label: __('Updated Daily Rent') },
+          { fieldname: 'updated_over_price', fieldtype: 'Currency', label: __('Updated Over Price') },
+          ...common,
+        ],
+        submitLabel: __('Record Verification'),
+      }).then((values) => values && ({
+        ...values,
+        updated_prices: {
+          over_price: values.updated_over_price,
+          rental_monthly_rate: values.updated_monthly_rent,
+          rental_daily_rate: values.updated_daily_rent,
+        },
+      }))
+    }
+    const initial = action.purpose === 'Initial Qualification'
+    return renderFieldLayoutDialog({
+      title: initial ? __('Call and Qualify Owner') : __('Owner Follow-up Call'),
+      fields: [
+        {
+          fieldname: 'contact_result', fieldtype: 'Select', label: __('Call Result'), reqd: 1,
+          options: 'Answered\nNo Answer\nWrong Number\nInvalid / Disconnected',
+        },
+        {
+          fieldname: 'qualification', fieldtype: 'Select', label: __('Owner Qualification'),
+          options: 'Interested\nNot Interested', reqd: initial,
+          depends_on: "eval:doc.contact_result == 'Answered'",
+        },
+        ...common,
+      ],
+      submitLabel: __('Record Call'),
+    })
+  }
+  if (action.action_type === 'Meeting') {
+    return renderFieldLayoutDialog({
+      title: __('Owner Explore Meeting'),
+      fields: [
+        { fieldname: 'outcome', fieldtype: 'Select', label: __('Meeting Result'), reqd: 1, options: 'Completed\nCancelled\nRescheduled' },
+        ...common,
+      ],
+      submitLabel: __('Record Meeting'),
+    })
+  }
+  if (action.action_type === 'Agent Pricing') {
+    return renderFieldLayoutDialog({
+      title: __('Agent Pricing Proposal'),
+      fields: [
+        { fieldname: 'proposed_over_price', fieldtype: 'Currency', label: __('Proposed Over Price') },
+        { fieldname: 'proposed_monthly_rent', fieldtype: 'Currency', label: __('Proposed Monthly Rent') },
+        { fieldname: 'proposed_daily_rent', fieldtype: 'Currency', label: __('Proposed Daily Rent') },
+        { fieldname: 'pricing_basis', fieldtype: 'Small Text', label: __('Comparable Units and Pricing Basis'), reqd: 1 },
+        ...common,
+      ],
+      submitLabel: __('Send for Owner Decision'),
+    }).then((values) => values && ({
+      ...values,
+      proposed_prices: {
+        over_price: values.proposed_over_price,
+        rental_monthly_rate: values.proposed_monthly_rent,
+        rental_daily_rate: values.proposed_daily_rent,
+      },
+    }))
+  }
+  if (action.action_type === 'Price Decision') {
+    return renderFieldLayoutDialog({
+      title: __('Owner Price Decision'),
+      fields: [
+        { fieldname: 'outcome', fieldtype: 'Select', label: __('Owner Decision'), reqd: 1, options: 'Accepted\nOwner Set Price\nRe-price\nDeclined' },
+        { fieldname: 'owner_over_price', fieldtype: 'Currency', label: __('Owner Over Price'), depends_on: "eval:doc.outcome == 'Owner Set Price'" },
+        { fieldname: 'owner_monthly_rent', fieldtype: 'Currency', label: __('Owner Monthly Rent'), depends_on: "eval:doc.outcome == 'Owner Set Price'" },
+        { fieldname: 'owner_daily_rent', fieldtype: 'Currency', label: __('Owner Daily Rent'), depends_on: "eval:doc.outcome == 'Owner Set Price'" },
+        ...common,
+      ],
+      submitLabel: __('Record Decision'),
+    }).then((values) => values && ({
+      ...values,
+      owner_prices: {
+        over_price: values.owner_over_price,
+        rental_monthly_rate: values.owner_monthly_rent,
+        rental_daily_rate: values.owner_daily_rent,
+      },
+    }))
+  }
+  if (action.action_type === 'Listing Documents') {
+    return renderFieldLayoutDialog({
+      title: __('Owner Documents and Listing Agreement'),
+      fields: [
+        { fieldname: 'ownership_document', fieldtype: 'Select', label: __('Ownership Proof'), reqd: 1, options: 'Ownership Contract\nTitle Deed / Registration' },
+        { fieldname: 'ownership_document_status', fieldtype: 'Select', label: __('Ownership Proof Status'), reqd: 1, options: 'Received\nVerified' },
+        { fieldname: 'ownership_document_file', fieldtype: 'Attach', label: __('Ownership Proof File'), private: true },
+        { fieldname: 'owner_id_document_status', fieldtype: 'Select', label: __('Owner ID / Passport Status'), reqd: 1, options: 'Received\nVerified' },
+        { fieldname: 'owner_id_document_file', fieldtype: 'Attach', label: __('Owner ID / Passport File'), private: true },
+        { fieldname: 'listing_agreement_type', fieldtype: 'Select', label: __('Listing Agreement Type'), reqd: 1, options: 'Exclusive\nNon-Exclusive' },
+        { fieldname: 'listing_agreement_reference', fieldtype: 'Data', label: __('Listing Agreement Reference') },
+        { fieldname: 'listing_agreement_signed_on', fieldtype: 'Date', label: __('Agreement Signed On'), reqd: 1 },
+        { fieldname: 'listing_agreement_expires_on', fieldtype: 'Date', label: __('Agreement Expires On') },
+        { fieldname: 'listing_commission_percent', fieldtype: 'Percent', label: __('Listing Commission %') },
+        { fieldname: 'listing_agreement_file', fieldtype: 'Attach', label: __('Signed Listing Agreement File'), private: true },
+        { fieldname: 'mark_listed', fieldtype: 'Check', label: __('Documents verified — publish the listing to Buyer matching') },
+        ...common,
+      ],
+      submitLabel: __('Save Documents'),
+    }).then((values) => values && ({
+        ...values,
+        owner_documents: [
+          { document_type: values.ownership_document, document_status: values.ownership_document_status, file: values.ownership_document_file },
+          { document_type: 'Owner National ID / Passport', document_status: values.owner_id_document_status, file: values.owner_id_document_file },
+        ],
+    }))
+  }
+  return renderFieldLayoutDialog({
+    title: __('Owner Workflow Action'), fields: common, submitLabel: __('Save Action'),
+  })
+}
+
+async function rescheduleOwnerWorkflowAction(action) {
+  const values = await renderFieldLayoutDialog({
+    title: __('Reschedule Owner Action'),
+    fields: [
+      { fieldname: 'scheduled_start', fieldtype: 'Datetime', label: __('New Date and Time'), reqd: 1 },
+      { fieldname: 'reason', fieldtype: 'Small Text', label: __('Reason') },
+    ],
+    submitLabel: __('Reschedule'),
+  })
+  if (!values?.scheduled_start) return
+  try {
+    await call('real_estate_crm_customs.owner_workflow.reschedule_owner_action', {
+      lead: props.leadId, action_name: action.name,
+      scheduled_start: values.scheduled_start, reason: values.reason,
+    })
+    reloadActionWeb()
+    toast.success(__('Owner action rescheduled and added to Events.'))
+  } catch (err) {
+    toast.error(err.messages?.[0] || err.message || __('Could not reschedule Owner action.'))
+  }
+}
+
+// Owner: full sectioned Unit intake (same Quick Entry layout as the Unit form).
 const OWNER_INTENT_LISTING_PURPOSE = {
   Sell: 'For Sale',
   Rent: 'For Rent',
   'Sell or Rent': 'For Sale or Rent',
 }
-const RENT_LISTING =
-  "['For Rent', 'For Sale or Rent'].includes(doc.listing_purpose)"
-const SALE_LISTING =
-  "['For Sale', 'For Sale or Rent'].includes(doc.listing_purpose)"
 
 async function addOwnerProperty() {
   if (!isOwnerLead.value) {
     toast.error(__('Add Property is available only for Owner leads.'))
     return
   }
-
   const values = await renderFieldLayoutDialog({
     title: __('Add Owner Property'),
-    size: 'lg',
-    // The Owner's intent pre-selects the purpose; the agent can change it per Unit.
+    doctype: 'Real Estate Unit',
+    size: '5xl',
     defaults: {
+      owner_lead: props.leadId,
+      inventory_type: 'Resale',
+      status: 'Available',
+      area_uom: 'Sq M',
       listing_purpose:
         OWNER_INTENT_LISTING_PURPOSE[doc.value.owner_intent] || 'For Sale',
+      pricing_method: 'Owner Price',
+      bedrooms: 0,
+      bathrooms: 0,
+      has_nanny_room: 0,
+      has_driver_room: 0,
+      has_storage_room: 0,
+      has_parking: 0,
+      paid: 0,
+      over_price: 0,
+      remaining: 0,
     },
-    fields: [
-      {
-        fieldname: 'listing_purpose',
-        fieldtype: 'Select',
-        label: __('Listing Purpose'),
-        options: 'For Sale\nFor Rent\nFor Sale or Rent',
-        reqd: 1,
-      },
-      {
-        fieldname: 'project',
-        fieldtype: 'Link',
-        label: __('Compound'),
-        options: 'Real Estate Project',
-        reqd: 1,
-      },
-      {
-        fieldname: 'unit_number',
-        fieldtype: 'Data',
-        label: __('Unit Number'),
-        reqd: 1,
-      },
-      {
-        fieldname: 'physical_unit_type',
-        fieldtype: 'Link',
-        label: __('Unit Type'),
-        options: 'Real Estate Unit Type',
-        reqd: 1,
-      },
-      {
-        fieldname: 'finishing_type',
-        fieldtype: 'Select',
-        label: __('Finishing Type'),
-        options:
-          '\nCore & Shell\nSemi-Finished\nFully Finished\nUltra Super Lux',
-        reqd: 1,
-      },
-      {
-        fieldname: 'delivery_date',
-        fieldtype: 'Date',
-        label: __('Delivery Date'),
-        reqd: 1,
-      },
-      {
-        fieldname: 'bedrooms',
-        fieldtype: 'Int',
-        label: __('Bedrooms'),
-        default: 0,
-      },
-      {
-        fieldname: 'bathrooms',
-        fieldtype: 'Int',
-        label: __('Bathrooms'),
-        default: 0,
-      },
-      {
-        fieldname: 'bua',
-        fieldtype: 'Float',
-        label: __('BUA'),
-      },
-      {
-        fieldname: 'paid',
-        fieldtype: 'Currency',
-        label: __('Paid'),
-        depends_on: `eval:${SALE_LISTING}`,
-      },
-      {
-        fieldname: 'over_price',
-        fieldtype: 'Currency',
-        label: __('Over Price'),
-        depends_on: `eval:${SALE_LISTING}`,
-      },
-      {
-        fieldname: 'over_is_gross',
-        fieldtype: 'Check',
-        label: __('Over Is Gross'),
-        depends_on: `eval:${SALE_LISTING}`,
-      },
-      {
-        fieldname: 'remaining',
-        fieldtype: 'Currency',
-        label: __('Remaining'),
-        depends_on: `eval:${SALE_LISTING}`,
-      },
-      {
-        fieldname: 'rental_monthly_rate',
-        fieldtype: 'Currency',
-        label: __('Monthly Rent'),
-        depends_on: `eval:${RENT_LISTING}`,
-        description: __('Enter a monthly or a daily rent.'),
-      },
-      {
-        fieldname: 'rental_daily_rate',
-        fieldtype: 'Currency',
-        label: __('Daily Rent'),
-        depends_on: `eval:${RENT_LISTING}`,
-      },
-    ],
-    submitLabel: __('Create Property'),
+    submitLabel: __('Create Owner Unit'),
   })
-  if (
-    !values?.project ||
-    !values?.unit_number ||
-    !values?.physical_unit_type ||
-    !values?.finishing_type ||
-    !values?.delivery_date
+  if (!values) return
+  // The server independently controls the Owner link, inventory source,
+  // listing state, financial projections and audit fields.
+  const forbidden = new Set([
+    'owner_lead', 'inventory_type', 'status', 'sku', 'listing_status',
+    'listing_status_reason', 'total_price_net', 'total_gross', 'property_tax',
+    'commission', 'over_net', 'down_payment', 'master_compound', 'destination',
+    'developer', 'unit_type', 'delivery_status', 'created_by',
+  ])
+  const unitData = Object.fromEntries(
+    Object.entries(values).filter(([fieldname, value]) =>
+      !forbidden.has(fieldname) && value !== undefined,
+    ),
   )
-    return
-  const forSale = ['For Sale', 'For Sale or Rent'].includes(
-    values.listing_purpose,
-  )
-  const forRent = ['For Rent', 'For Sale or Rent'].includes(
-    values.listing_purpose,
-  )
-  if (forRent && !values.rental_monthly_rate && !values.rental_daily_rate) {
-    toast.error(
-      __('Enter the monthly or daily rent for a Unit listed for rent.'),
-    )
-    return
-  }
-
   try {
-    await call('real_estate_crm_customs.api.create_resale_unit', {
-      owner_lead: props.leadId,
-      project: values.project,
-      unit_number: values.unit_number,
-      physical_unit_type: values.physical_unit_type,
-      finishing_type: values.finishing_type,
-      delivery_date: values.delivery_date,
-      bedrooms: values.bedrooms || 0,
-      bathrooms: values.bathrooms || 0,
-      bua: values.bua || null,
-      listing_purpose: values.listing_purpose,
-      // Sale amounts are not sent for a rent-only Unit, and rents only when renting.
-      paid: forSale ? values.paid || null : null,
-      over_price: forSale ? values.over_price || null : null,
-      over_is_gross: forSale && values.over_is_gross ? 1 : 0,
-      remaining: forSale ? values.remaining || null : null,
-      rental_monthly_rate: forRent ? values.rental_monthly_rate || null : null,
-      rental_daily_rate: forRent ? values.rental_daily_rate || null : null,
+    await call('real_estate_crm_customs.owner_workflow.create_owner_unit', {
+      lead: props.leadId,
+      unit_data: unitData,
+      pricing_method: values.pricing_method || 'Owner Price',
     })
     reloadActionWeb()
-    toast.success(__('Owner property created and linked to this lead.'))
+    toast.success(__('Owner Unit added. Continue the pricing and document actions before listing it to buyers.'))
   } catch (err) {
     toast.error(
-      err.messages?.[0] || err.message || __('Error creating owner property'),
+      err.messages?.[0] || err.message || __('Error creating Owner Unit'),
     )
   }
 }

@@ -112,7 +112,7 @@ This fork is the **portal UI** of a real-estate CRM. The business rules, data mo
 - `AGENTS.md`: invariants, workflow model, incident log and safe-change procedures (AI-agent knowledge base).
 - `docs/TECHNICAL_GUIDE.md`: the full human-readable technical guide, with diagrams.
 
-Snapshot: 28 Oct 2026, fork `develop` at `1810fd3c`.
+Snapshot: 29 Oct 2026 Owner Lead / Unit listing workflow release. The backend and this fork must be deployed together (custom app first).
 
 ### Rules that bind this UI
 
@@ -122,7 +122,7 @@ Snapshot: 28 Oct 2026, fork `develop` at `1810fd3c`.
 4. **Buyer actions use one popup with one atomic submit**: `LeadUnifiedActionDialog.vue` → `submit_lead_action_bundle`. Fields appear step by step. All requirement fields must be fillable **before** a Next Action is chosen. Next Action is validated only at final submit. Notes are optional.
 5. **Every non-submit `<button>` inside a `<form>` must have `type="button"`.** A missing type caused the "cannot fill requirement until Next Action is chosen" bug (`components/frappe-ui/Autocomplete.vue`, tests in `tests/unit/autocompleteFormSafety.test.js`).
 6. **Interests are created only inside the action cycle.** There is no direct "Add Interest" button elsewhere.
-7. **Owners own Units; Buyers link Units only through Interests.** Owner Lead page: Add Property (`create_resale_unit`, Listing Purpose For Sale / For Rent / For Sale or Rent, rents when renting).
+7. **Owners own Units; Buyers link Units only through Interests.** `OwnerListingWorkflow.vue` is a separate Owner panel; never force its actions into the Buyer Interest popup. Add Property opens the full Unit section layout and calls `owner_workflow.create_owner_unit`. Owner Unit actions call `submit_owner_action`; the server is the evidence and Buyer-visibility authority. Ownership proof, Owner ID, signed listing agreement and signed Buyer contract Attach fields must upload with `private: true` (`AttachControl.vue`); do not make legal evidence public.
 8. **Phone fields** use `components/Controls/PhoneInput.vue` (country selector with flags, `libphonenumber-js`), which stores the Desk format `+CC-NUMBER`.
 9. Use **Yarn** with the existing lockfile. Do not commit pnpm or npm artifacts. Restore `frontend/auto-imports.d.ts` and `frontend/components.d.ts` if a build only regenerated them.
 
@@ -130,12 +130,13 @@ Snapshot: 28 Oct 2026, fork `develop` at `1810fd3c`.
 
 | File | Responsibility |
 |---|---|
-| `pages/Lead.vue` | Lead page (Buyer and Owner variants), flags and actions card, WhatsApp and call buttons, Properties tab, Add Property, requirement edit dialogs. |
+| `pages/Lead.vue` | Lead page (Buyer and Owner variants), Owner workflow resource/action dialogs, flags/actions card, Properties tab, full Add Property intake and requirement dialogs. |
+| `components/OwnerListingWorkflow.vue` | Owner-only guided panel: calls, Unit cards, pricing/documents/availability actions and Buyer counters. |
 | `components/LeadUnifiedActionDialog.vue` | The single Buyer action popup: results, requirements (Deal Type, Destination, Unit Category → Unit Type, budgets), Smart Match, meetings, closing, Next Action. |
 | `components/Modals/UnitSelectionDialog.vue` | Smart Match picker with dependent filters, scores, reasons and gaps, multi-select. |
 | `components/LeadInterestWorkboard.vue` | One row per Interest with its legal row actions. |
 | `components/LeadActionWeb.vue`, `LeadSmartEvents.vue`, `LeadProgressGraph.vue`, `LeadInterestGroups.vue` | Current action, prioritised events, ideal-versus-actual graph, grouped Interests. |
-| `pages/RealEstateList.vue`, `pages/RealEstateForm.vue` | Generic list and form pages for the 7 masters; dependent Link filters, Compound Phases panel, manager Return to Market for Rented Units. |
+| `pages/RealEstateList.vue`, `pages/RealEstateForm.vue` | Generic list/form pages for the 7 masters; dependent filters, Compound Phases, manager Return to Market and Unit View/Buyer insight cards. `RealEstateForm.vue` must call `owner_workflow.log_unit_view` once per opened Unit because `frappe.client.get` does not write View Log. |
 | `utils/realEstate.js` | `REAL_ESTATE_ENTITIES` (routes, columns, summary fields), dependent filter rules, Data Import doctype map. |
 | `utils/interestWorkflow.js` | Requirement snapshot, payload builders, Deal Type / Unit Category / rent budget helpers. |
 | `utils/leadRole.js` | Buyer and Owner roles and routes (`/buyers`, `/owners`; `/sellers` redirects). |

@@ -265,6 +265,7 @@
       :docname="data.name"
       :fieldname="field.fieldname"
       :imageOnly="field.fieldtype === 'Attach Image'"
+      :private="Boolean(field.private) || ['listing_agreement_file', 'signed_contract', 'file'].includes(field.fieldname)"
       :disabled="Boolean(field.read_only)"
       @change="(v) => fieldChange(v, field)"
     />

@@ -77,6 +77,24 @@
         </div>
       </section>
 
+      <section
+        v-if="showUnitInsights"
+        class="grid gap-3 rounded-xl border bg-surface-white p-4 shadow-sm sm:grid-cols-3"
+      >
+        <div class="rounded-lg bg-surface-gray-1 px-3 py-2">
+          <p class="text-xs font-medium text-ink-gray-5">{{ __('Unit views') }}</p>
+          <p class="mt-1 text-lg font-semibold text-ink-gray-9">{{ unitInsights?.view_count || 0 }}</p>
+        </div>
+        <div class="rounded-lg bg-surface-gray-1 px-3 py-2">
+          <p class="text-xs font-medium text-ink-gray-5">{{ __('Active interested Buyers') }}</p>
+          <p class="mt-1 text-lg font-semibold text-ink-gray-9">{{ unitInsights?.active_buyer_interest_count || 0 }}</p>
+        </div>
+        <div class="rounded-lg bg-surface-gray-1 px-3 py-2">
+          <p class="text-xs font-medium text-ink-gray-5">{{ __('All linked Buyers') }}</p>
+          <p class="mt-1 text-lg font-semibold text-ink-gray-9">{{ unitInsights?.total_buyer_interest_count || 0 }}</p>
+        </div>
+      </section>
+
       <section class="rounded-xl border bg-surface-white p-4 shadow-sm sm:p-6">
         <FieldLayout
           v-if="layout.data"
@@ -206,6 +224,30 @@ const {
 } = useDocument(doctype, docname)
 
 const doc = computed(() => document.doc || {})
+const unitInsights = ref(null)
+const viewedUnitNames = new Set()
+const showUnitInsights = computed(() =>
+  doctype === 'Real Estate Unit' && !isNew.value && Boolean(doc.value?.name),
+)
+
+watch(
+  () => doc.value?.name,
+  async (name) => {
+    if (doctype !== 'Real Estate Unit' || !name || viewedUnitNames.has(name)) return
+    viewedUnitNames.add(name)
+    try {
+      // frappe.client.get used by the portal does not write View Log. This
+      // endpoint records one unique current-user view and returns live counts.
+      unitInsights.value = await call(
+        'real_estate_crm_customs.owner_workflow.log_unit_view',
+        { unit: name },
+      )
+    } catch {
+      // Reading a Unit must remain possible even if optional analytics fails.
+    }
+  },
+  { immediate: true },
+)
 const doctypePermissions = createResource({
   url: 'real_estate_crm_customs.api.get_real_estate_doctype_permissions',
   params: { doctype },
